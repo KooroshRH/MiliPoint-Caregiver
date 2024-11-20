@@ -70,7 +70,7 @@ class Main:
             'type': str, 'default': None, 'help': 'Accelerator style.',
         },
         ('-s', '--strategy'): {
-            'type': str, 'default': None, 'help': 'Strategy style, e.g. ddp.',
+            'type': str, 'default': "auto", 'help': 'Strategy style, e.g. ddp.',
         },
         # dataset related
         ('-config', '--dataset_config'): {
