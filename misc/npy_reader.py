@@ -9,5 +9,5 @@ def read_npy_file(file_path):
         print(f"An error occurred: {e}")
 
 if __name__ == "__main__":
-    file_path = input("Enter the path to the .npy file: ")
+    file_path = "data\\raw\\action_label.npy"
     read_npy_file(file_path)
