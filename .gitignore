@@ -1,1 +1,16 @@
 data/*
+mmrnet/__pycache__/__init__.cpython-39.pyc
+mmrnet/__pycache__/cli.cpython-39.pyc
+mmrnet/dataset/__pycache__/__init__.cpython-39.pyc
+mmrnet/dataset/__pycache__/mmrnet_data.cpython-39.pyc
+mmrnet/models/__pycache__/__init__.cpython-39.pyc
+mmrnet/models/__pycache__/dgcnn.cpython-39.pyc
+mmrnet/models/__pycache__/mlp.cpython-39.pyc
+mmrnet/models/__pycache__/point_transformer.cpython-39.pyc
+mmrnet/models/__pycache__/pointmlp.cpython-39.pyc
+mmrnet/models/__pycache__/pointnet.cpython-39.pyc
+mmrnet/session/__pycache__/__init__.cpython-39.pyc
+mmrnet/session/__pycache__/test.cpython-39.pyc
+mmrnet/session/__pycache__/train.cpython-39.pyc
+mmrnet/session/__pycache__/visualize.cpython-39.pyc
+mmrnet/session/__pycache__/wrapper.cpython-39.pyc

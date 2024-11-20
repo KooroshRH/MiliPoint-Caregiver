@@ -12,8 +12,9 @@ from torch_geometric.data.collate import collate
 
 
 class MMRKeypointData(Dataset):
-    raw_data_path = 'data/raw'
+    raw_data_path = 'data/raw_carelab'
     processed_data = 'data/processed/mmr_kp/data.pkl'
+    carelab_label_map = {'ABHR_dispensing': 0, 'BP_measurement': 1, 'bed_adjustment': 2, 'bed_rails_down': 3, 'bed_rails_up': 4, 'bed_sitting': 5, 'bedpan_placement': 6, 'coat_assistance': 7, 'curtain_closing': 8, 'curtain_opening': 9, 'door_closing': 10, 'door_opening': 11, 'equipment_cleaning': 12, 'light_control': 13, 'oxygen_saturation_measurement': 14, 'phone_touching': 15, 'pulse_measurement': 16, 'replacing_IV_bag': 17, 'self_touching': 18, 'stethoscope_use': 19, 'table_bed_move': 20, 'table_object_move': 21, 'table_side_move': 22, 'temperature_measurement': 23, 'turning_bed': 24, 'walker_assistance': 25, 'walking_assistance': 26, 'wheelchair_move': 27, 'wheelchair_transfer': 28}
     max_points = 22
     seed = 42
     partitions = (0.8, 0.1, 0.1)
@@ -83,8 +84,12 @@ class MMRKeypointData(Dataset):
 
     @property
     def raw_file_names(self):
-        file_names = [i for i in range(19)]
-        return [f'{self.raw_data_path}/{i}.pkl' for i in file_names]
+        if "carelab" in self.raw_data_path:
+            file_names = [f for f in os.listdir(self.raw_data_path) if f.endswith('.pkl')]
+            return [f'{self.raw_data_path}/{f}' for f in file_names]
+        else:
+            file_names = [i for i in range(19)]
+            return [f'{self.raw_data_path}/{i}.pkl' for i in file_names]
 
     def _process(self):
         data_list = []
@@ -237,9 +242,15 @@ class MMRIdentificationData(MMRKeypointData):
 class MMRActionData(MMRKeypointData):
     processed_data = 'data/processed/mmr_act/data.pkl'
     def __init__(self, *args, **kwargs):
-        self.action_label = np.load('./data/raw/action_label.npy')
+        if "carelab" in self.raw_data_path:
+            self.action_label = []
+        else:
+            self.action_label = np.load('./data/raw/action_label.npy')
         super().__init__(*args, **kwargs)
-        self.info['num_classes'] = len(np.unique(self.action_label))-1 # except -1
+        if "carelab" in self.raw_data_path:
+            self.info['num_classes'] = 29
+        else:
+            self.info['num_classes'] = len(np.unique(self.action_label))-1 # except -1
         self.target_dtype = torch.int64
 
     def _process(self):
@@ -250,9 +261,18 @@ class MMRActionData(MMRKeypointData):
                 data_slice = pickle.load(f)
             data_list = data_list + data_slice
 
-        for i, data in enumerate(data_list):
-            data['y'] = self.action_label[i]
-        data_list = [d for d in data_list if d['y']!=-1]
+        if "carelab" in self.raw_data_path:
+            for data in data_list:
+                if data['y'] != -1:
+                    data['y'] = self.carelab_label_map[data['y']]
+        else:
+            for i, data in enumerate(data_list):
+                data['y'] = self.action_label[i]
+
+        data_list = [d for d in data_list if d['y']!=-1 and d['x'].shape[0] > 0]
+
+        if "carelab" in self.raw_data_path:
+            self.action_label = [d['y'] for d in data_list]
 
         data_list = self.stack_and_padd_frames(data_list)
         num_samples = len(data_list)
