@@ -27,6 +27,7 @@ class MMRKeypointData(Dataset):
     def _parse_config(self, c):
         c = {k: v for k, v in c.items() if v is not None}
         self.seed = c.get('seed', self.seed)
+        self.raw_data_path = c.get('raw_data_path', self.raw_data_path)
         self.processed_data = c.get('processed_data', self.processed_data)
         self.max_points = c.get('max_points', self.max_points)
         self.partitions = (

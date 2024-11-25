@@ -1,5 +1,6 @@
 seed = 20
-processed_data = 'data/processed/mmr_action/seed_20_stacks_40_padd_point_task_action.pkl'
+raw_data_path = 'data/raw_carelab'
+processed_data = 'data/processed_carelab/mmr_action/seed_20_stacks_40_padd_point_task_action.pkl'
 train_split = 0.8
 val_split = 0.1
 test_split = 0.1
