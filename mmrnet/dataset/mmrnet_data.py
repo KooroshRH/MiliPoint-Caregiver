@@ -9,6 +9,7 @@ import json
 
 from torch_geometric.data import Dataset
 from torch_geometric.data.collate import collate
+from sklearn.model_selection import KFold
 
 
 class MMRKeypointData(Dataset):
@@ -23,6 +24,9 @@ class MMRKeypointData(Dataset):
     zero_padding_styles = ['per_data_point', 'per_stack', 'data_point', 'stack']
     num_keypoints = 9
     forced_rewrite = False
+    cross_validation = None
+    num_folds = 5
+    fold_number = 0
 
     def _parse_config(self, c):
         c = {k: v for k, v in c.items() if v is not None}
@@ -41,6 +45,9 @@ class MMRKeypointData(Dataset):
             raise ValueError(
                 f'Zero padding style {self.zero_padding} not supported.')
         self.forced_rewrite = c.get('forced_rewrite', self.forced_rewrite)
+        self.cross_validation = c.get('cross_validation', self.cross_validation)
+        self.num_folds = c.get('num_folds', self.num_folds)
+        self.fold_number = c.get('fold_number', self.fold_number)
 
     def __init__(
             self, root, partition, 
@@ -57,8 +64,12 @@ class MMRKeypointData(Dataset):
         else:
             with open(self.processed_data, 'rb') as f:
                 self.data = pickle.load(f)
-        total_samples = len(self.data['train']) + len(self.data['val']) + len(self.data['test'])
-        self.data = self.data[partition]
+        if self.cross_validation == '5-fold':
+            self.kf = KFold(n_splits=self.num_folds, shuffle=True, random_state=self.seed)
+            self.data = self._get_fold_data(self.data, self.fold_number, partition)
+        else:
+            total_samples = len(self.data['train']) + len(self.data['val']) + len(self.data['test'])
+            self.data = self.data[partition]
         self.num_samples = len(self.data)
         self.target_dtype = torch.float
         self.info = {
@@ -70,8 +81,24 @@ class MMRKeypointData(Dataset):
             'partition': partition,
         }
         logging.info(
-            f'Loaded {partition} data with {self.num_samples} samples,'
-            f' where the total number of samples is {total_samples}')
+            f'Loaded {partition} data with {self.num_samples} samples,')
+
+    def _get_fold_data(self, data_map, fold_number, partition):
+        fold_data = {'train': [], 'val': [], 'test': []}
+        for fold, (train_idx, test_idx) in enumerate(self.kf.split(data_map['train'] + data_map['val'] + data_map['test'])):
+            if fold == fold_number:
+                train_data = [data_map['train'][i] for i in train_idx if i < len(data_map['train'])] + \
+                             [data_map['val'][i - len(data_map['train'])] for i in train_idx if len(data_map['train']) <= i < len(data_map['train']) + len(data_map['val'])] + \
+                             [data_map['test'][i - len(data_map['train']) - len(data_map['val'])] for i in train_idx if i >= len(data_map['train']) + len(data_map['val'])]
+                test_data = [data_map['train'][i] for i in test_idx if i < len(data_map['train'])] + \
+                            [data_map['val'][i - len(data_map['train'])] for i in test_idx if len(data_map['train']) <= i < len(data_map['train']) + len(data_map['val'])] + \
+                            [data_map['test'][i - len(data_map['train']) - len(data_map['val'])] for i in test_idx if i >= len(data_map['train']) + len(data_map['val'])]
+                val_end = int(len(test_data) * 0.5)
+                fold_data['train'] = train_data
+                fold_data['val'] = test_data[:val_end]
+                fold_data['test'] = test_data[val_end:]
+                break
+        return fold_data[partition]
 
     def len(self):
         return self.num_samples
@@ -110,19 +137,35 @@ class MMRKeypointData(Dataset):
         random.seed(self.seed)
         random.shuffle(data_list)
 
-        # get partitions
-        train_end = int(self.partitions[0] * num_samples)
-        val_end = train_end + int(self.partitions[1] * num_samples)
-        train_data = data_list[:train_end]
-        val_data = data_list[train_end:val_end]
-        test_data = data_list[val_end:]
+        if self.cross_validation == '5-fold':
+            data_map = self._create_folds(data_list)
+        else:
+            # get partitions
+            train_end = int(self.partitions[0] * num_samples)
+            val_end = train_end + int(self.partitions[1] * num_samples)
+            train_data = data_list[:train_end]
+            val_data = data_list[train_end:val_end]
+            test_data = data_list[val_end:]
 
-        data_map = {
-            'train': train_data,
-            'val': val_data,
-            'test': test_data,
-        }
+            data_map = {
+                'train': train_data,
+                'val': val_data,
+                'test': test_data,
+            }
         return data_map, num_samples
+
+    def _create_folds(self, data_list):
+        data_map = {'train': [], 'val': [], 'test': []}
+        for fold, (train_idx, test_idx) in enumerate(self.kf.split(data_list)):
+            train_data = [data_list[i] for i in train_idx]
+            test_data = [data_list[i] for i in test_idx]
+            val_end = int(len(test_data) * 0.5)
+            val_data = test_data[:val_end]
+            test_data = test_data[val_end:]
+            data_map[f'train_fold_{fold}'] = train_data
+            data_map[f'val_fold_{fold}'] = val_data
+            data_map[f'test_fold_{fold}'] = test_data
+        return data_map
 
     def stack_and_padd_frames(self, data_list):
         if self.stacks is None:

@@ -104,6 +104,18 @@ class Main:
         ('-d_processed_data', '--dataset_processed_data'): {
             'type': str, 'default': None, 'help': 'Processed data file.',
         },
+        ('-d_raw_data_path', '--dataset_raw_data_path'): {
+            'type': str, 'default': None, 'help': 'Raw data path.',
+        },
+        ('-d_cross_validation', '--dataset_cross_validation'): {
+            'type': str, 'default': None, 'help': 'cross validation type',
+        },
+        ('-d_num_folds', '--dataset_num_folds'): {
+            'type': str, 'default': None, 'help': 'Number of total folds for the cross validation.',
+        },
+        ('-d_fold_number', '--dataset_fold_number'): {
+            'type': str, 'default': None, 'help': 'The target fold number for the session.',
+        },
         ('-d_forced_rewrite', '--dataset_forced_rewrite'): {
             'action': 'store_true', 'help': 'Force to rewrite the processed data.',
         },
