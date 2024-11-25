@@ -27,6 +27,7 @@ class MMRKeypointData(Dataset):
     cross_validation = None
     num_folds = 5
     fold_number = 0
+    subject_id = None
 
     def _parse_config(self, c):
         c = {k: v for k, v in c.items() if v is not None}
@@ -48,6 +49,7 @@ class MMRKeypointData(Dataset):
         self.cross_validation = c.get('cross_validation', self.cross_validation)
         self.num_folds = c.get('num_folds', self.num_folds)
         self.fold_number = c.get('fold_number', self.fold_number)
+        self.subject_id = c.get('subject_id', self.subject_id)
 
     def __init__(
             self, root, partition, 
@@ -64,7 +66,9 @@ class MMRKeypointData(Dataset):
         else:
             with open(self.processed_data, 'rb') as f:
                 self.data = pickle.load(f)
-        if self.cross_validation == '5-fold':
+        if self.cross_validation == 'LOSO':
+            self.data = self._get_loso_data(self.data, self.subject_id, partition)
+        elif self.cross_validation == '5-fold':
             self.kf = KFold(n_splits=self.num_folds, shuffle=True, random_state=self.seed)
             self.data = self._get_fold_data(self.data, self.fold_number, partition)
         else:
@@ -100,6 +104,20 @@ class MMRKeypointData(Dataset):
                 break
         return fold_data[partition]
 
+    def _get_loso_data(self, data_map, subject_id, partition):
+        train_data = []
+        val_data = []
+        test_data = []
+        for key in data_map:
+            if key.startswith(subject_id):
+                test_data.extend(data_map[key])
+            else:
+                train_data.extend(data_map[key])
+        val_end = int(len(test_data) * 0.5)
+        val_data = test_data[:val_end]
+        test_data = test_data[val_end:]
+        return {'train': train_data, 'val': val_data, 'test': test_data}[partition]
+
     def len(self):
         return self.num_samples
     
@@ -120,32 +138,39 @@ class MMRKeypointData(Dataset):
             return [f'{self.raw_data_path}/{i}.pkl' for i in file_names]
 
     def _process(self):
-        data_list = []
+        data_list = {}
         for fn in self.raw_file_names:
             logging.info(f'Loading {fn}')
             with open(fn, 'rb') as f:
                 data_slice = pickle.load(f)
-            data_list = data_list + data_slice
-        num_samples = len(data_list)
+            subject_id = os.path.basename(fn).split('_')[0]
+            if subject_id not in data_list:
+                data_list[subject_id] = []
+            data_list[subject_id].extend(data_slice)
+        num_samples = sum(len(v) for v in data_list.values())
         logging.info(f'Loaded {num_samples} data points')
 
         # stack and pad frames based on config
-        data_list = self.transform_keypoints(data_list)
-        data_list = self.stack_and_padd_frames(data_list)
+        data_list = {k: self.transform_keypoints(v) for k, v in data_list.items()}
+        data_list = {k: self.stack_and_padd_frames(v) for k, v in data_list.items()}
 
         #random shuffle train and val data
         random.seed(self.seed)
-        random.shuffle(data_list)
+        for k in data_list:
+            random.shuffle(data_list[k])
 
         if self.cross_validation == '5-fold':
             data_map = self._create_folds(data_list)
+        elif self.cross_validation == 'LOSO':
+            data_map = data_list
         else:
             # get partitions
+            all_data = [item for sublist in data_list.values() for item in sublist]
             train_end = int(self.partitions[0] * num_samples)
             val_end = train_end + int(self.partitions[1] * num_samples)
-            train_data = data_list[:train_end]
-            val_data = data_list[train_end:val_end]
-            test_data = data_list[val_end:]
+            train_data = all_data[:train_end]
+            val_data = all_data[train_end:val_end]
+            test_data = all_data[val_end:]
 
             data_map = {
                 'train': train_data,
