@@ -2,6 +2,9 @@ import pytorch_lightning as pl
 import torch
 import numpy as np
 from torch.optim.lr_scheduler import CosineAnnealingLR
+from sklearn.metrics import f1_score, confusion_matrix
+import seaborn as sns
+import matplotlib.pyplot as plt
 
 
 class ModelWrapper(pl.LightningModule):
@@ -65,7 +68,24 @@ class ModelWrapper(pl.LightningModule):
         y_hat = self.forward(x)
         loss = self.loss(y_hat, y)
         metric = self.metric(y_hat, y)
-        # val_loss
+        
+        # Calculate F1 score
+        y_pred = torch.argmax(y_hat, axis=1)
+        f1 = f1_score(y.cpu(), y_pred.cpu(), average='weighted')
+        
+        # Compute confusion matrix
+        cm = confusion_matrix(y.cpu(), y_pred.cpu())
+        
+        # Plot confusion matrix
+        plt.figure(figsize=(10, 8))
+        sns.heatmap(cm, annot=True, fmt='d', cmap='Blues')
+        plt.xlabel('Predicted')
+        plt.ylabel('True')
+        plt.title('Confusion Matrix')
+        plt.savefig(f'confusion_matrix_epoch_{self.current_epoch}.png')
+        plt.close()
+
+        # Log metrics
         if self.metric_name == 'acc':
             # compute top-3
             top3 = torch.topk(y_hat, 3, dim=1)[1]
@@ -75,13 +95,15 @@ class ModelWrapper(pl.LightningModule):
                 {
                     "test_loss": loss, 
                     f'test_{self.metric_name}': metric,
-                    f'test_top3_{self.metric_name}': top3_acc},
+                    f'test_top3_{self.metric_name}': top3_acc,
+                    "test_f1_score": f1},
                 on_step=False, on_epoch=True, prog_bar=False, logger=True)
         else:
             self.log_dict(
                 {
                     "test_loss": loss, 
-                    f'test_{self.metric_name}': metric},
+                    f'test_{self.metric_name}': metric,
+                    "test_f1_score": f1},
                 on_step=False, on_epoch=True, prog_bar=False, logger=True)
         return {"test_loss": loss}
 
