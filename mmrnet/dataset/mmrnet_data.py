@@ -6,6 +6,7 @@ import logging
 import random
 from tqdm import tqdm
 import json
+import torchvision.transforms as T
 
 from torch_geometric.data import Dataset
 from torch_geometric.data.collate import collate
@@ -86,6 +87,12 @@ class MMRKeypointData(Dataset):
         }
         logging.info(
             f'Loaded {partition} data with {self.num_samples} samples,')
+        self.augment = T.Compose([
+            T.RandomHorizontalFlip(),
+            T.RandomVerticalFlip(),
+            T.RandomRotation(30),
+            T.Lambda(lambda x: x + torch.randn_like(x) * 0.01)  # Add random noise
+        ])
 
     def _get_fold_data(self, data_map, fold_number, partition):
         fold_data = {'train': [], 'val': [], 'test': []}
@@ -98,7 +105,7 @@ class MMRKeypointData(Dataset):
                             [data_map['val'][i - len(data_map['train'])] for i in test_idx if len(data_map['train']) <= i < len(data_map['train']) + len(data_map['val'])] + \
                             [data_map['test'][i - len(data_map['train']) - len(data_map['val'])] for i in test_idx if i >= len(data_map['train']) + len(data_map['val'])]
                 val_end = int(len(test_data) * 0.5)
-                fold_data['train'] = train_data
+                fold_data['train'] = [self._augment_data(d) for d in train_data]
                 fold_data['val'] = test_data[:val_end]
                 fold_data['test'] = test_data[val_end:]
                 break
@@ -116,6 +123,7 @@ class MMRKeypointData(Dataset):
         val_end = int(len(test_data) * 0.5)
         val_data = test_data[:val_end]
         test_data = test_data[val_end:]
+        train_data = [self._augment_data(d) for d in train_data]
         return {'train': train_data, 'val': val_data, 'test': test_data}[partition]
 
     def len(self):
@@ -172,12 +180,22 @@ class MMRKeypointData(Dataset):
             val_data = all_data[train_end:val_end]
             test_data = all_data[val_end:]
 
+            # Apply augmentation to training data
+            train_data = [self._augment_data(d) for d in train_data]
+
             data_map = {
                 'train': train_data,
                 'val': val_data,
                 'test': test_data,
             }
         return data_map, num_samples
+
+    def _augment_data(self, data):
+        x = data['x']
+        x = torch.tensor(x, dtype=torch.float32)
+        x = self.augment(x)
+        data['x'] = x.numpy()
+        return data
 
     def _create_folds(self, data_list):
         data_map = {'train': [], 'val': [], 'test': []}
