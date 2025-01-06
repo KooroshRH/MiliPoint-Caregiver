@@ -183,6 +183,52 @@ class MMRKeypointData(Dataset):
             # Apply augmentation to training data
             train_data = [self._augment_data(d) for d in train_data]
 
+            # Balance the samples by undersampling the majority class
+            class_counts = {}
+            for data in train_data:
+                label = data['y']
+                if label not in class_counts:
+                    class_counts[label] = 0
+                class_counts[label] += 1
+
+            min_count = min(class_counts.values())
+            balanced_train_data = []
+
+            for label, count in class_counts.items():
+                label_data = [d for d in train_data if d['y'] == label]
+                if count > min_count:
+                    label_data = random.sample(label_data, min_count)
+                # Print the number of samples per class before balancing
+                print("Number of samples per class before balancing:")
+                for label, count in class_counts.items():
+                    print(f"Class {label}: {count}")
+
+                min_count = min(class_counts.values())
+                balanced_train_data = []
+
+                for label, count in class_counts.items():
+                    label_data = [d for d in train_data if d['y'] == label]
+                    if count > min_count:
+                        label_data = random.sample(label_data, min_count)
+                    balanced_train_data.extend(label_data)
+
+                train_data = balanced_train_data
+
+                # Print the number of samples per class after balancing
+                balanced_class_counts = {}
+                for data in train_data:
+                    label = data['y']
+                    if label not in balanced_class_counts:
+                        balanced_class_counts[label] = 0
+                    balanced_class_counts[label] += 1
+
+                print("Number of samples per class after balancing:")
+                for label, count in balanced_class_counts.items():
+                    print(f"Class {label}: {count}")
+                balanced_train_data.extend(label_data)
+
+            train_data = balanced_train_data
+
             data_map = {
                 'train': train_data,
                 'val': val_data,
