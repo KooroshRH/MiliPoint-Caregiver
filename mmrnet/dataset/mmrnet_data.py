@@ -335,7 +335,7 @@ class MMRActionData(MMRKeypointData):
             self.action_label = np.load('./data/raw/action_label.npy')
         super().__init__(*args, **kwargs)
         if "carelab" in self.raw_data_path:
-            self.info['num_classes'] = 29
+            self.info['num_classes'] = 30
         else:
             self.info['num_classes'] = len(np.unique(self.action_label))-1 # except -1
         self.target_dtype = torch.int64
