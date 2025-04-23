@@ -22,7 +22,7 @@ def extract_point_clouds_from_json(json_file_path, labels_npy_path):
                 frame_point_clouds.append(point_cloud[:3])
 
             frame_timestamp = datetime.datetime.strptime(frame['timeStamp'], "%d-%m-%Y-%H-%M-%S-%f")
-
+            timestamp_ms = int(frame_timestamp.timestamp() * 1000)
             label = -1
             for i in range(len(label_data) - 1):
                 start_label, start_time = label_data[i]
@@ -33,8 +33,12 @@ def extract_point_clouds_from_json(json_file_path, labels_npy_path):
                 if start_label.startswith("start-") and stop_label.startswith("stop-") and start_time <= frame_timestamp <= stop_time:
                     label = start_label.split("start-")[1]
                     break
-    
-            output.append({"x": np.asarray(frame_point_clouds), "y": label})
+                
+                if start_label == "full_session" and stop_label == "full_session" and start_time <= frame_timestamp <= stop_time:
+                    label = "walking"
+                    break
+                
+            output.append({"x": np.asarray(frame_point_clouds), "y": label, "timestamp": timestamp_ms})
 
     return output
 
@@ -49,7 +53,7 @@ def process_scenario_folder(scenario_folder, subject, scenario):
     if scenario_data is None:
         return
     
-    pickle_file_path = os.path.join("data\\raw_carelab", f"{subject}_{scenario}.pkl")
+    pickle_file_path = os.path.join("data\\raw_carelab_full_timed", f"{subject}_{scenario}.pkl")
     with open(pickle_file_path, 'wb') as f:
         pickle.dump(scenario_data, f)
     

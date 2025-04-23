@@ -36,6 +36,9 @@ class ModelWrapper(pl.LightningModule):
 
         self.best_val_loss = 10e9
 
+        self.ys = []
+        self.y_hats = []
+
     def forward(self, x):
         return self.model(x)
 
@@ -68,22 +71,9 @@ class ModelWrapper(pl.LightningModule):
         y_hat = self.forward(x)
         loss = self.loss(y_hat, y)
         metric = self.metric(y_hat, y)
-        
-        # Calculate F1 score
-        y_pred = torch.argmax(y_hat, axis=1)
-        f1 = f1_score(y.cpu(), y_pred.cpu(), average='weighted')
-        
-        # Compute confusion matrix
-        cm = confusion_matrix(y.cpu(), y_pred.cpu())
-        
-        # Plot confusion matrix
-        plt.figure(figsize=(10, 8))
-        sns.heatmap(cm, annot=True, fmt='d', cmap='Blues')
-        plt.xlabel('Predicted')
-        plt.ylabel('True')
-        plt.title('Confusion Matrix')
-        plt.savefig(f'confusion_matrix_epoch_{self.current_epoch}.png')
-        plt.close()
+
+        self.ys.append(y)
+        self.y_hats.append(y_hat)
 
         # Log metrics
         if self.metric_name == 'acc':
@@ -95,15 +85,13 @@ class ModelWrapper(pl.LightningModule):
                 {
                     "test_loss": loss, 
                     f'test_{self.metric_name}': metric,
-                    f'test_top3_{self.metric_name}': top3_acc,
-                    "test_f1_score": f1},
+                    f'test_top3_{self.metric_name}': top3_acc},
                 on_step=False, on_epoch=True, prog_bar=False, logger=True)
         else:
             self.log_dict(
                 {
                     "test_loss": loss, 
-                    f'test_{self.metric_name}': metric,
-                    "test_f1_score": f1},
+                    f'test_{self.metric_name}': metric},
                 on_step=False, on_epoch=True, prog_bar=False, logger=True)
         return {"test_loss": loss}
 
@@ -136,6 +124,46 @@ class ModelWrapper(pl.LightningModule):
                 self.best_val_loss = val_loss
             self.val_losses = []
 
+    def on_test_epoch_end(self):
+        self.ys = torch.cat(self.ys)
+        self.y_hats = torch.cat(self.y_hats)
+
+        # Calculate F1 score before merging
+        f1_before_merge = f1_score(self.ys.cpu(), torch.argmax(self.y_hats, axis=1).cpu(), average='macro')
+        
+        # Define the mapping for merging classes into 4 groups
+        merge_map = {
+            0: 1, 1: 3, 2: 1, 3: 1, 4: 1, 5: 2, 6: 2, 7: 2, 
+            8: 1, 9: 1, 10: 1, 11: 1, 12: 1, 13: 1, 14: 3, 15: 1, 
+            16: 3, 17: 1, 18: 1, 19: 3, 20: 1, 21: 2, 22: 1, 23: 3, 
+            24: 2, 25: 2, 26: 2, 27: 2, 28: 2, 29: 0
+        }
+        merged_ys = torch.tensor([merge_map[int(y)] for y in self.ys])
+        merged_y_hats = torch.tensor([merge_map[int(y)] for y in torch.argmax(self.y_hats, axis=1)])
+
+        # Calculate F1 score for merged classes
+        f1_merged = f1_score(merged_ys.cpu(), merged_y_hats.cpu(), average='macro')
+        
+        # Calculate accuracy for merged classes
+        accuracy_merged = (merged_ys == merged_y_hats).float().mean().item()
+        
+        # Compute confusion matrix for merged classes
+        cm_merged = confusion_matrix(merged_ys.cpu(), merged_y_hats.cpu())
+
+        print(f"\nConfusion Matrix (Merged Classes): \n{cm_merged}")
+        
+        # Plot confusion matrix for merged classes
+        plt.figure(figsize=(10, 8))
+        sns.heatmap(cm_merged, annot=True, fmt='d', cmap='Blues')
+        plt.xlabel('Predicted')
+        plt.ylabel('True')
+        plt.title('Confusion Matrix (Merged Classes)')
+        plt.savefig(f'confusion_matrix_merged_epoch_{self.current_epoch}.png')
+        plt.close()
+
+        print(f"\n\nTest F1 score (Before Merging): {f1_before_merge}")
+        print(f"\nTest F1 score (Merged Classes): {f1_merged}")
+        print(f"\nTest Accuracy (Merged Classes): {accuracy_merged}")
 
 def mean_localization_error(x, y):
     dist = (x-y).pow(2).sum(-1).sqrt().mean()
