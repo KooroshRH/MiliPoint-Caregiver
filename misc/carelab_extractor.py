@@ -71,6 +71,9 @@ def extract_point_clouds_from_json(json_file_path, labels_npy_path, zone_file):
 
             zone_num = zone_lookup.get((frame_num, iso_timestamp), 0)
 
+            for point in frame_point_clouds:
+                point.append(zone_num)
+
             output.append({"x": np.asarray(frame_point_clouds), "y": label, "timestamp": timestamp_ms, "zone": zone_num})
 
     return output
