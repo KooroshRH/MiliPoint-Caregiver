@@ -23,15 +23,25 @@ class PointNetWithFiLM(PointNet):
     def __init__(self, info, zone_dim=6):
         super().__init__(info)
         self.zone_film = ZoneFiLM(feat_dim=128, zone_dim=zone_dim)  
+        self.zone_dim = zone_dim
         # 128 = output dim of sa1_module in your code
 
-    def forward(self, data, zone_onehot):
-        # data: (B, N, 3)
-        # zone_onehot: (B, N, zone_dim)
-
+    def forward(self, data):
+        # data: (B, N, 4) where last dimension is zone index
+        
         batchsize, npoints, _ = data.shape
-        x = data.reshape((batchsize * npoints, 3))
-        zone_flat = zone_onehot.reshape((batchsize * npoints, -1))  # flatten
+        
+        # Extract xyz coordinates and zone indices
+        xyz = data[:, :, :3]  # (B, N, 3)
+        zone_indices = data[:, :, 3].long()  # (B, N) - zone indices
+        
+        # Convert zone indices to one-hot encoding
+        zone_onehot = torch.zeros(batchsize, npoints, self.zone_dim, device=data.device)
+        zone_onehot.scatter_(2, zone_indices.unsqueeze(-1), 1)  # (B, N, zone_dim)
+        
+        # Reshape for processing
+        x = xyz.reshape((batchsize * npoints, 3))
+        zone_flat = zone_onehot.reshape((batchsize * npoints, self.zone_dim))  # flatten
 
         batch = torch.arange(batchsize).repeat_interleave(npoints).to(x.device)
         sa0_out = (x, x, batch)
