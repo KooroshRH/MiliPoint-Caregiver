@@ -1,0 +1,2 @@
+[console_scripts]
+milipoint = mmrnet.cli:main

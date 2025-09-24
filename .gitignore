@@ -4,3 +4,8 @@ mmrnet/__pycache__/cli.cpython-39.pyc
 mmrnet/dataset/__pycache__/*
 mmrnet/models/__pycache__/*
 mmrnet/session/__pycache__/*
+*.out
+checkpoints/
+lightning_logs/
+*.png
+milenv/

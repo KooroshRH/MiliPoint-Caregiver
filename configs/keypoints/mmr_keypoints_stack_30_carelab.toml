@@ -1,0 +1,8 @@
+seed = 20
+raw_data_path = 'data/raw_carelab_full_timed'
+processed_data = '/cluster/projects/kite/koorosh/Data/MiliPointCareLab/data/processed_carelab/mmr_kp/seed_20_stacks_30_padd_point_task_kp.pkl'
+train_split = 0.9
+val_split = 0.05
+test_split = 0.05
+stacks = 30
+zero_padding = 'per_data_point'

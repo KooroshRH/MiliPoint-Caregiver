@@ -14,7 +14,7 @@ from sklearn.model_selection import KFold
 
 
 class MMRKeypointData(Dataset):
-    raw_data_path = 'data/raw_carelab'
+    raw_data_path = 'data/raw_carelab_full_timed'
     processed_data = 'data/processed/mmr_kp/data.pkl'
     carelab_label_map = {'ABHR_dispensing': 0, 'BP_measurement': 1, 'bed_adjustment': 2, 'bed_rails_down': 3, 'bed_rails_up': 4, 'bed_sitting': 5, 'bedpan_placement': 6, 'coat_assistance': 7, 'curtain_closing': 8, 'curtain_opening': 9, 'door_closing': 10, 'door_opening': 11, 'equipment_cleaning': 12, 'light_control': 13, 'oxygen_saturation_measurement': 14, 'phone_touching': 15, 'pulse_measurement': 16, 'replacing_IV_bag': 17, 'self_touching': 18, 'stethoscope_use': 19, 'table_bed_move': 20, 'table_object_move': 21, 'table_side_move': 22, 'temperature_measurement': 23, 'turning_bed': 24, 'walker_assistance': 25, 'walking_assistance': 26, 'wheelchair_move': 27, 'wheelchair_transfer': 28, 'start-walking': 29}
     max_points = 22
@@ -23,7 +23,7 @@ class MMRKeypointData(Dataset):
     stacks = None
     zero_padding = 'per_data_point'
     zero_padding_styles = ['per_data_point', 'per_stack', 'data_point', 'stack']
-    num_keypoints = 9
+    num_keypoints = 17
     forced_rewrite = False
     cross_validation = None
     num_folds = 5
@@ -51,6 +51,9 @@ class MMRKeypointData(Dataset):
         self.num_folds = c.get('num_folds', self.num_folds)
         self.fold_number = c.get('fold_number', self.fold_number)
         self.subject_id = c.get('subject_id', self.subject_id)
+        self.num_keypoints = 17
+
+        print(self.raw_data_path)
 
     def __init__(
             self, root, partition, 
@@ -181,53 +184,53 @@ class MMRKeypointData(Dataset):
             test_data = all_data[val_end:]
 
             # Apply augmentation to training data
-            train_data = [self._augment_data(d) for d in train_data]
+            # train_data = [self._augment_data(d) for d in train_data]
 
             # Balance the samples by undersampling the majority class
-            class_counts = {}
-            for data in train_data:
-                label = data['y']
-                if label not in class_counts:
-                    class_counts[label] = 0
-                class_counts[label] += 1
+            #class_counts = {}
+            #for data in train_data:
+            #    label = data['y']
+            #    if label not in class_counts:
+            #        class_counts[label] = 0
+            #    class_counts[label] += 1
 
-            min_count = min(class_counts.values())
-            balanced_train_data = []
+            #min_count = min(class_counts.values())
+            #balanced_train_data = []
 
-            for label, count in class_counts.items():
-                label_data = [d for d in train_data if d['y'] == label]
-                if count > min_count:
-                    label_data = random.sample(label_data, min_count)
+            #for label, count in class_counts.items():
+            #    label_data = [d for d in train_data if d['y'] == label]
+            #    if count > min_count:
+            #        label_data = random.sample(label_data, min_count)
                 # Print the number of samples per class before balancing
-                print("Number of samples per class before balancing:")
-                for label, count in class_counts.items():
-                    print(f"Class {label}: {count}")
+            #    print("Number of samples per class before balancing:")
+            #    for label, count in class_counts.items():
+            #        print(f"Class {label}: {count}")
 
-                min_count = min(class_counts.values())
-                balanced_train_data = []
+            #    min_count = min(class_counts.values())
+            #    balanced_train_data = []
 
-                for label, count in class_counts.items():
-                    label_data = [d for d in train_data if d['y'] == label]
-                    if count > min_count:
-                        label_data = random.sample(label_data, min_count)
-                    balanced_train_data.extend(label_data)
+            #    for label, count in class_counts.items():
+            #        label_data = [d for d in train_data if d['y'] == label]
+            #        if count > min_count:
+            #            label_data = random.sample(label_data, min_count)
+            #        balanced_train_data.extend(label_data)
 
-                train_data = balanced_train_data
+            #    train_data = balanced_train_data
 
                 # Print the number of samples per class after balancing
-                balanced_class_counts = {}
-                for data in train_data:
-                    label = data['y']
-                    if label not in balanced_class_counts:
-                        balanced_class_counts[label] = 0
-                    balanced_class_counts[label] += 1
+            #    balanced_class_counts = {}
+            #    for data in train_data:
+            #        label = data['y']
+            #        if label not in balanced_class_counts:
+            #            balanced_class_counts[label] = 0
+            #        balanced_class_counts[label] += 1
 
-                print("Number of samples per class after balancing:")
-                for label, count in balanced_class_counts.items():
-                    print(f"Class {label}: {count}")
-                balanced_train_data.extend(label_data)
-
-            train_data = balanced_train_data
+            #    print("Number of samples per class after balancing:")
+            #    for label, count in balanced_class_counts.items():
+            #        print(f"Class {label}: {count}")
+            #    balanced_train_data.extend(label_data)
+            #
+            #train_data = balanced_train_data
 
             data_map = {
                 'train': train_data,
@@ -273,9 +276,12 @@ class MMRKeypointData(Dataset):
                     if i - j >= 0:
                         mydata_slice = xs[i - j]
                         diff = self.max_points - mydata_slice.shape[0]
-                        mydata_slice = np.pad(mydata_slice, ((0, max(diff, 0)), (0, 0)), 'constant')
-                        mydata_slice = mydata_slice[np.random.choice(len(mydata_slice), self.max_points, replace=False)]  
-                        data_point.append(mydata_slice)
+                        if len(mydata_slice) == 0:
+                            data_point.append(np.zeros((self.max_points, 3)))
+                        else:
+                            mydata_slice = np.pad(mydata_slice, ((0, max(diff, 0)), (0, 0)), 'constant')
+                            mydata_slice = mydata_slice[np.random.choice(len(mydata_slice), self.max_points, replace=False)]  
+                            data_point.append(mydata_slice)
                     else:
                         data_point.append(np.zeros((self.max_points, 3)))
                 padded_xs.append(np.concatenate(data_point, axis=0))
@@ -311,7 +317,8 @@ class MMRKeypointData(Dataset):
                  'LEFT_HIP', 'LEFT_KNEE', 'HEAD']
     head_names = ['NOSE', 'RIGHT_EYE', 'LEFT_EYE', 'RIGHT_EAR', 'LEFT_EAR']
     def transform_keypoints(self, data_list):
-        if self.num_keypoints == 18:
+        print(self.num_keypoints)
+        if self.num_keypoints == 17:
             return data_list
         
         print("Transforming keypoints ...")
