@@ -11,6 +11,9 @@ import torchvision.transforms as T
 from torch_geometric.data import Dataset
 from torch_geometric.data.collate import collate
 from sklearn.model_selection import KFold
+from imblearn.under_sampling import RandomUnderSampler
+from imblearn.over_sampling import SMOTE
+from imblearn.combine import SMOTEENN
 
 
 class MMRKeypointData(Dataset):
@@ -62,6 +65,13 @@ class MMRKeypointData(Dataset):
         super(MMRKeypointData, self).__init__(
             root, transform, pre_transform, pre_filter)
         self._parse_config(mmr_dataset_config)
+
+        self.augment = T.Compose([
+            T.RandomHorizontalFlip(),
+            T.RandomVerticalFlip(),
+            T.Lambda(lambda x: x + torch.randn_like(x) * 0.01)  # Add random noise
+        ])
+
         # check if processed_data exists
         if (not os.path.isfile(self.processed_data)) or self.forced_rewrite:
             self.data, _ = self._process()
@@ -78,6 +88,28 @@ class MMRKeypointData(Dataset):
         else:
             total_samples = len(self.data['train']) + len(self.data['val']) + len(self.data['test'])
             self.data = self.data[partition]
+
+        if partition == 'train':
+            class_counts = {}
+            for data in self.data:
+                label = data['y']
+                if label not in class_counts:
+                    class_counts[label] = 0
+                class_counts[label] += 1
+
+            min_count = min(class_counts.values())
+            balanced_data = []
+
+            for label, count in class_counts.items():
+                label_data = [d for d in self.data if d['y'] == label]
+                if count > min_count:
+                    random.seed(self.seed)
+                    label_data = random.sample(label_data, min_count)
+                balanced_data.extend(label_data)
+
+            self.data = balanced_data
+            self.data = [self._augment_data(d) for d in self.data]
+
         self.num_samples = len(self.data)
         self.target_dtype = torch.float
         self.info = {
@@ -90,12 +122,6 @@ class MMRKeypointData(Dataset):
         }
         logging.info(
             f'Loaded {partition} data with {self.num_samples} samples,')
-        self.augment = T.Compose([
-            T.RandomHorizontalFlip(),
-            T.RandomVerticalFlip(),
-            T.RandomRotation(30),
-            T.Lambda(lambda x: x + torch.randn_like(x) * 0.01)  # Add random noise
-        ])
 
     def _get_fold_data(self, data_map, fold_number, partition):
         fold_data = {'train': [], 'val': [], 'test': []}
@@ -108,7 +134,8 @@ class MMRKeypointData(Dataset):
                             [data_map['val'][i - len(data_map['train'])] for i in test_idx if len(data_map['train']) <= i < len(data_map['train']) + len(data_map['val'])] + \
                             [data_map['test'][i - len(data_map['train']) - len(data_map['val'])] for i in test_idx if i >= len(data_map['train']) + len(data_map['val'])]
                 val_end = int(len(test_data) * 0.5)
-                fold_data['train'] = [self._augment_data(d) for d in train_data]
+
+                fold_data['train'] = train_data
                 fold_data['val'] = test_data[:val_end]
                 fold_data['test'] = test_data[val_end:]
                 break
@@ -241,9 +268,8 @@ class MMRKeypointData(Dataset):
 
     def _augment_data(self, data):
         x = data['x']
-        x = torch.tensor(x, dtype=torch.float32)
-        x = self.augment(x)
-        data['x'] = x.numpy()
+        x = self.augment(torch.tensor(x, dtype=torch.float32)).numpy()
+        data['x'] = x
         return data
 
     def _create_folds(self, data_list):
