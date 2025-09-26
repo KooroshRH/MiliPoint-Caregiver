@@ -1,6 +1,6 @@
 import torch
 import torch.nn as nn
-from pointnet import PointNet
+from .pointnet import PointNet
 
 class ZoneFiLM(nn.Module):
     def __init__(self, feat_dim, zone_dim=6, embed_dim=16):
@@ -46,11 +46,20 @@ class PointNetWithFiLM(PointNet):
         batch = torch.arange(batchsize).repeat_interleave(npoints).to(x.device)
         sa0_out = (x, x, batch)
 
-        # SA1
+        # SA1 - we need to manually perform FPS to get indices for zone propagation
+        from torch_geometric.nn import fps
+        
+        # Get FPS indices (same as in SA1)
+        sa1_idx = fps(x, batch, ratio=0.5)  # Same ratio as sa1_module
+        
+        # Apply zone information using FPS indices
+        zone_sa1_flat = zone_flat[sa1_idx]  # Direct indexing using FPS indices
+        
+        # Now run SA1 normally
         x, pos, batch = self.sa1_module(*sa0_out)
-
-        # Apply FiLM on per-point features
-        x = self.zone_film(x, zone_flat)
+        
+        # Apply FiLM on per-point features (dimensions now match!)
+        x = self.zone_film(x, zone_sa1_flat)
 
         # SA2 + SA3 as usual
         sa2_out = self.sa2_module(x, pos, batch)

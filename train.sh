@@ -1,7 +1,7 @@
 #!/bin/bash
 
 #SBATCH -A kite_gpu
-#SBATCH -t 0-1:0:0
+#SBATCH -t 0-12:0:0
 #SBATCH --output out_pointnet_zoned_carelab_act_test.out
 #SBATCH -p gpu
 #SBATCH --gres=gpu:v100:1
@@ -22,4 +22,4 @@ module load python3/3.10.9
 
 source milenv/bin/activate
 
-python mm.py train mmr_act pointnet-film --save-name pointnet-film_stack40_act -config ./configs/action/mmr_action_stack_40_point_carelab_5fold_0.toml -a gpu -m 400 -lr 1e-3 -b 64
+python mm.py train mmr_act pointnet-film --save-name pointnet-film_stack40_act -config ./configs/action/mmr_action_stack_40_point_carelab_5fold_0.toml -a gpu

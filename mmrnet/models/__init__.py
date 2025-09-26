@@ -7,13 +7,7 @@ from .pointmlp import PointMLP
 from .attdgcnn import AttDGCNN
 from .hybrid_pointnet import HybridPointNet
 from .ensemble_model import EnsembleModel, load_ensemble_from_checkpoint
-
-# Import the new PointNet-FiLM model
-try:
-    from .pointnet_film import PointNetWithFiLM
-    POINTNET_FILM_AVAILABLE = True
-except ImportError:
-    POINTNET_FILM_AVAILABLE = False
+from .pointnet_film import PointNetWithFiLM
 
 model_map = {
     'dgcnn': DGCNN,
@@ -24,8 +18,5 @@ model_map = {
     'attdgcnn': AttDGCNN,
     'hybrid': HybridPointNet,
     'ensemble': EnsembleModel,
+    'pointnet-film': PointNetWithFiLM
 }
-
-# Add PointNet-FiLM to model_map if available
-if POINTNET_FILM_AVAILABLE:
-    model_map['pointnet-film'] = PointNetWithFiLM

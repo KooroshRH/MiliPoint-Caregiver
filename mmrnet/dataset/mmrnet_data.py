@@ -17,9 +17,9 @@ from imblearn.combine import SMOTEENN
 
 
 class MMRKeypointData(Dataset):
-    raw_data_path = i'data/raw_carelab_zoned'
+    raw_data_path = 'data/raw_carelab_zoned'
     processed_data = 'data/processed/mmr_kp/data.pkl'
-    carelab_label_map = {'ABHR_dispensing': 0, 'BP_measurement': 1, 'bed_adjustment': 2, 'bed_rails_down': 3, 'bed_rails_up': 4, 'bed_sitting': 5, 'bedpan_placement': 6, 'coat_assistance': 7, 'curtain_closing': 8, 'curtain_opening': 9, 'door_closing': 10, 'door_opening': 11, 'equipment_cleaning': 12, 'light_control': 13, 'oxygen_saturation_measurement': 14, 'phone_touching': 15, 'pulse_measurement': 16, 'replacing_IV_bag': 17, 'self_touching': 18, 'stethoscope_use': 19, 'table_bed_move': 20, 'table_object_move': 21, 'table_side_move': 22, 'temperature_measurement': 23, 'turning_bed': 24, 'walker_assistance': 25, 'walking_assistance': 26, 'wheelchair_move': 27, 'wheelchair_transfer': 28, 'start-walking': 29}
+    carelab_label_map = {'ABHR_dispensing': 0, 'BP_measurement': 1, 'bed_adjustment': 2, 'bed_rails_down': 3, 'bed_rails_up': 4, 'bed_sitting': 5, 'bedpan_placement': 6, 'coat_assistance': 7, 'curtain_closing': 8, 'curtain_opening': 9, 'door_closing': 10, 'door_opening': 11, 'equipment_cleaning': 12, 'light_control': 13, 'oxygen_saturation_measurement': 14, 'phone_touching': 15, 'pulse_measurement': 16, 'replacing_IV_bag': 17, 'self_touching': 18, 'stethoscope_use': 19, 'table_bed_move': 20, 'table_object_move': 21, 'table_side_move': 22, 'temperature_measurement': 23, 'turning_bed': 24, 'walker_assistance': 25, 'walking_assistance': 26, 'wheelchair_move': 27, 'wheelchair_transfer': 28, 'start-walking': 29, 'walking': 29}
     max_points = 22
     seed = 42
     partitions = (0.8, 0.1, 0.1)
@@ -484,7 +484,7 @@ class MMRActionData(MMRKeypointData):
                         mydata_slice = mydata_slice[np.random.choice(len(mydata_slice), self.max_points, replace=False)]  
                         data_point.append(mydata_slice)
                     else:
-                        data_point.append(np.zeros((self.max_points, 3)))
+                        data_point.append(np.zeros((self.max_points, 4)))
                 padded_xs.append(np.concatenate(data_point, axis=0))
                 pbar.update(1)
         elif self.zero_padding in ['per_stack', 'stack']:
