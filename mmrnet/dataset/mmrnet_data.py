@@ -1355,10 +1355,13 @@ class MMRActionData(Dataset):
 
         # take multiple frames for each x
         xs = [d['x'] for d in data_list]
+        # Extract action labels from the current data_list for label consistency checking
+        ys = [d['y'] for d in data_list]
         stacked_xs = []
         padded_xs = []
 
         logging.info(f"Processing {len(xs)} data samples with temporal stacking...")
+        logging.info(f"Label distribution: {len(set(ys))} unique actions in current batch")
         pbar = tqdm(total=len(xs), desc="Frame stacking")
 
         if self.zero_padding in ['per_data_point', 'data_point']:
@@ -1369,7 +1372,7 @@ class MMRActionData(Dataset):
             for i in range(len(xs)):
                 data_point = []
                 for j in range(self.stacks):
-                    if i - j >= 0 and self.action_label[i] == self.action_label[i-j]:
+                    if i - j >= 0 and ys[i] == ys[i-j]:
                         mydata_slice = xs[i - j]
                         diff = self.max_points - mydata_slice.shape[0]
                         mydata_slice = np.pad(mydata_slice, ((0, max(diff, 0)), (0, 0)), 'constant')
@@ -1390,7 +1393,7 @@ class MMRActionData(Dataset):
             # First phase: stack frames
             for i in range(len(xs)):
                 start = max(0, i - self.stacks)
-                while self.action_label[i] != self.action_label[start]:
+                while start < i and ys[i] != ys[start]:
                     start = start + 1
                 frames_in_stack = i - start + 1
                 total_frames_stacked += frames_in_stack
