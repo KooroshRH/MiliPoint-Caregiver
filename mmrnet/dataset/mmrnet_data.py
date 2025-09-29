@@ -1036,8 +1036,12 @@ class MMRActionData(Dataset):
         Raises:
             ValueError: If subject_id is not found in data_map
         """
-        logging.info(f"Extracting LOSO data: target_subject='{subject_id}', partition='{partition}'")
-        logging.info(f"Available subjects: {list(data_map.keys())}")
+        logging.info(f"Extracting LOSO data: target_subject='{subject_id}' (type: {type(subject_id)}), partition='{partition}'")
+        logging.info(f"Available subjects: {list(data_map.keys())} (key types: {[type(k) for k in list(data_map.keys())[:3]]})")
+
+        # Convert subject_id to string to match the format used in data_map keys
+        # (subject IDs are extracted from filenames and stored as strings)
+        subject_id = str(subject_id)
 
         if subject_id not in data_map:
             available_subjects = list(data_map.keys())
