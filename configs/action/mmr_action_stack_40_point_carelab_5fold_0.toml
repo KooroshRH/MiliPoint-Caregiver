@@ -1,5 +1,5 @@
 seed = 20
-raw_data_path = 'data/raw_carelab'
+raw_data_path = 'data/raw_carelab_zoned'
 processed_data = '/cluster/projects/kite/koorosh/Data/MiliPointCareLab/data/processed_carelab/mmr_action/seed_20_stacks_40_padd_point_task_action.pkl'
 cross_validation = '5-fold'
 num_folds = 5

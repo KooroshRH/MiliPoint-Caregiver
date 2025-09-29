@@ -697,7 +697,12 @@ class MMRActionData(Dataset):
         Raises:
             ValueError: If required configuration parameters are missing
         """
+        logging.info("=" * 60)
+        logging.info("INITIALIZING MMRActionData CONFIGURATION")
+        logging.info("=" * 60)
+
         if c is None:
+            logging.error("Configuration dictionary is None")
             raise ValueError("Configuration dictionary is required for MMRActionData")
 
         # Define mandatory parameters
@@ -713,7 +718,10 @@ class MMRActionData(Dataset):
                 missing_params.append(param)
 
         if missing_params:
+            logging.error(f"Missing mandatory configuration parameters: {missing_params}")
             raise ValueError(f"Missing mandatory configuration parameters: {missing_params}")
+
+        logging.info("✓ All mandatory parameters present")
 
         # Filter out None values to use defaults for optional parameters
         c = {k: v for k, v in c.items() if v is not None}
@@ -731,19 +739,34 @@ class MMRActionData(Dataset):
         self.fold_number = c['fold_number']
         self.subject_id = c['subject_id']
 
+        logging.info(f"Configuration Summary:")
+        logging.info(f"  - Raw data path: {self.raw_data_path}")
+        logging.info(f"  - Processed data path: {self.processed_data}")
+        logging.info(f"  - Cross-validation: {self.cross_validation}")
+        logging.info(f"  - Max points per frame: {self.max_points}")
+        logging.info(f"  - Frame stacking: {self.stacks}")
+        logging.info(f"  - Random seed: {self.seed}")
+
         # Validate cross-validation configuration
         if self.cross_validation not in [None, 'LOSO', '5-fold']:
+            logging.error(f"Invalid cross_validation method: {self.cross_validation}")
             raise ValueError(f"Invalid cross_validation method: {self.cross_validation}. "
                            "Must be None, 'LOSO', or '5-fold'")
 
-        if self.cross_validation == 'LOSO' and not self.subject_id:
-            raise ValueError("subject_id is required when cross_validation='LOSO'")
+        if self.cross_validation == 'LOSO':
+            if not self.subject_id:
+                logging.error("subject_id is required for LOSO but not provided")
+                raise ValueError("subject_id is required when cross_validation='LOSO'")
+            logging.info(f"  - LOSO target subject: {self.subject_id}")
 
         if self.cross_validation == '5-fold':
             if self.num_folds < 2:
+                logging.error(f"Invalid num_folds: {self.num_folds}")
                 raise ValueError("num_folds must be >= 2 for 5-fold cross-validation")
             if self.fold_number < 0 or self.fold_number >= self.num_folds:
+                logging.error(f"Invalid fold_number: {self.fold_number} (must be 0-{self.num_folds-1})")
                 raise ValueError(f"fold_number must be between 0 and {self.num_folds-1}")
+            logging.info(f"  - K-fold: {self.num_folds} folds, using fold {self.fold_number}")
 
         # Parse train/validation/test split ratios (optional, use defaults if not provided)
         self.partitions = (
@@ -757,14 +780,21 @@ class MMRActionData(Dataset):
         self.forced_rewrite = c.get('forced_rewrite', self.forced_rewrite)
         self.use_augmentation = c.get('use_augmentation', self.use_augmentation)
 
+        logging.info(f"  - Data splits: {self.partitions[0]:.1%} train, {self.partitions[1]:.1%} val, {self.partitions[2]:.1%} test")
+        logging.info(f"  - Zero padding strategy: {self.zero_padding}")
+        logging.info(f"  - Data augmentation: {'enabled' if self.use_augmentation else 'disabled'}")
+        logging.info(f"  - Force rewrite: {'yes' if self.forced_rewrite else 'no'}")
+
         # Validate zero padding style
         if self.zero_padding not in self.zero_padding_styles:
+            logging.error(f"Unsupported zero padding style: {self.zero_padding}")
             raise ValueError(
                 f'Zero padding style {self.zero_padding} not supported.')
 
         # Override with fixed value for consistency
         self.num_keypoints = 17
-        print(self.raw_data_path)
+        logging.info("✓ Configuration validation completed successfully")
+        logging.info("=" * 60)
 
     def __init__(
             self, root, partition,
@@ -800,40 +830,71 @@ class MMRActionData(Dataset):
         ])
 
         # Load or process data
+        logging.info(f"LOADING DATA FOR PARTITION: {partition.upper()}")
+        logging.info("-" * 40)
+
         if (not os.path.isfile(self.processed_data)) or self.forced_rewrite:
             # Process raw data and save to disk
+            logging.warning(f"{'Forced rewrite requested' if self.forced_rewrite else 'Processed data not found'}")
+            logging.info("Processing raw data from scratch...")
             self.data, _ = self._process()
+
+            logging.info(f"Saving processed data to: {self.processed_data}")
             with open(self.processed_data, 'wb') as f:
                 pickle.dump(self.data, f)
+            logging.info("✓ Processed data saved successfully")
         else:
             # Load preprocessed data from disk
+            logging.info(f"Loading existing processed data from: {self.processed_data}")
             with open(self.processed_data, 'rb') as f:
                 self.data = pickle.load(f)
+            logging.info("✓ Processed data loaded successfully")
 
         # Apply cross-validation splits if specified
+        logging.info("APPLYING CROSS-VALIDATION STRATEGY")
+        logging.info("-" * 40)
+
         if self.cross_validation == 'LOSO':
+            logging.info(f"Applying Leave-One-Subject-Out (LOSO) cross-validation")
+            logging.info(f"Target subject for testing: {self.subject_id}")
+
             # For LOSO, we need to reconstruct subject-based grouping from processed data
             if isinstance(self.data, dict) and 'train' in self.data:
+                logging.info("Reconstructing subject-based grouping from train/val/test splits")
                 # Reconstruct subject-based data from train/val/test splits
                 all_samples = self.data['train'] + self.data['val'] + self.data['test']
+                logging.info(f"Total samples to regroup: {len(all_samples)}")
                 subject_grouped_data = self._group_samples_by_subject(all_samples)
                 self.data = self._get_loso_data(subject_grouped_data, self.subject_id, partition)
             else:
+                logging.info("Using existing subject-based data structure")
                 # Data is already in subject-based format
                 self.data = self._get_loso_data(self.data, self.subject_id, partition)
+
         elif self.cross_validation == '5-fold':
+            logging.info(f"Applying {self.num_folds}-fold cross-validation")
+            logging.info(f"Using fold {self.fold_number} for current partition: {partition}")
+
             # K-fold cross-validation
             self.kf = KFold(n_splits=self.num_folds, shuffle=True, random_state=self.seed)
             self.data = self._get_fold_data(self.data, self.fold_number, partition)
+
         else:
+            logging.info("Using standard train/validation/test split")
             # Standard train/val/test split
             if isinstance(self.data, dict) and 'train' in self.data:
+                original_size = len(self.data[partition])
                 self.data = self.data[partition]
+                logging.info(f"Extracted {len(self.data)} samples from {partition} partition")
             else:
+                logging.error("Processed data format not compatible with standard train/val/test split")
                 raise ValueError("Processed data format not compatible with standard train/val/test split")
 
         # Apply class balancing and augmentation for training data
         if partition == 'train':
+            logging.info("APPLYING TRAINING DATA PROCESSING")
+            logging.info("-" * 40)
+
             # Count samples per class
             class_counts = {}
             for data in self.data:
@@ -841,12 +902,14 @@ class MMRActionData(Dataset):
                 if label not in class_counts:
                     class_counts[label] = 0
                 class_counts[label] += 1
-            
-            print("Number of samples per class before balancing:")
-            for label, count in class_counts.items():
-                print(f"Class {label}: {count}")
+
+            logging.info(f"Class distribution before balancing ({len(self.data)} total samples):")
+            for label, count in sorted(class_counts.items()):
+                logging.info(f"  Class {label}: {count} samples")
+
             # Balance classes by undersampling majority classes
             min_count = min(class_counts.values())
+            logging.info(f"Balancing classes to minimum count: {min_count} samples per class")
             balanced_data = []
 
             for label, count in class_counts.items():
@@ -855,10 +918,14 @@ class MMRActionData(Dataset):
                     # Randomly sample down to minimum class size
                     random.seed(self.seed)
                     label_data = random.sample(label_data, min_count)
+                    logging.info(f"  Class {label}: undersampled from {count} to {len(label_data)} samples")
+                else:
+                    logging.info(f"  Class {label}: keeping all {count} samples")
                 balanced_data.extend(label_data)
 
             self.data = balanced_data
-            # Print class distribution after balancing
+
+            # Verify balanced class distribution
             balanced_class_counts = {}
             for data in self.data:
                 label = data['y']
@@ -866,12 +933,18 @@ class MMRActionData(Dataset):
                     balanced_class_counts[label] = 0
                 balanced_class_counts[label] += 1
 
-            for label, count in balanced_class_counts.items():
-                print(f"Class {label}: {count}")
+            logging.info(f"Class distribution after balancing ({len(self.data)} total samples):")
+            for label, count in sorted(balanced_class_counts.items()):
+                logging.info(f"  Class {label}: {count} samples")
 
             # Apply data augmentation if enabled
             if self.use_augmentation:
+                logging.info("Applying data augmentation to training samples...")
+                original_count = len(self.data)
                 self.data = [self._augment_data(d) for d in self.data]
+                logging.info(f"✓ Augmentation applied to {original_count} samples")
+            else:
+                logging.info("Data augmentation disabled - skipping")
 
         # Set final dataset properties
         self.num_samples = len(self.data)
@@ -892,8 +965,18 @@ class MMRActionData(Dataset):
             'stacks': self.stacks,
             'partition': partition,
         }
-        logging.info(
-            f'Loaded {partition} data with {self.num_samples} samples,')
+
+        # Final summary
+        logging.info("DATASET INITIALIZATION COMPLETED")
+        logging.info("=" * 60)
+        logging.info(f"Final dataset summary for partition '{partition.upper()}':")
+        logging.info(f"  - Total samples: {self.num_samples}")
+        logging.info(f"  - Number of classes: {num_classes}")
+        logging.info(f"  - Keypoints per frame: {self.num_keypoints}")
+        logging.info(f"  - Max points per frame: {self.max_points}")
+        logging.info(f"  - Frame stacking: {self.stacks if self.stacks else 'disabled'}")
+        logging.info(f"  - Cross-validation: {self.cross_validation if self.cross_validation else 'standard split'}")
+        logging.info("=" * 60)
 
     def _get_fold_data(self, data_map, fold_number, partition):
         """
@@ -907,8 +990,11 @@ class MMRActionData(Dataset):
         Returns:
             List of data samples for the specified partition and fold
         """
+        logging.info(f"Extracting K-fold data: fold {fold_number}/{self.num_folds}, partition='{partition}'")
+
         # Flatten all data into a single list for proper k-fold splitting
         all_data = data_map['train'] + data_map['val'] + data_map['test']
+        logging.info(f"Total samples for K-fold splitting: {len(all_data)}")
 
         # Apply KFold to the flattened data
         for fold, (train_idx, test_idx) in enumerate(self.kf.split(all_data)):
@@ -925,9 +1011,14 @@ class MMRActionData(Dataset):
                     'val': test_data[:val_end],
                     'test': test_data[val_end:]
                 }
+
+                logging.info(f"K-fold split sizes: train={len(fold_data['train'])}, "
+                           f"val={len(fold_data['val'])}, test={len(fold_data['test'])}")
+
                 return fold_data[partition]
 
         # This should never happen if fold_number is valid
+        logging.error(f"Invalid fold_number: {fold_number}. Must be between 0 and {self.num_folds-1}")
         raise ValueError(f"Invalid fold_number: {fold_number}. Must be between 0 and {self.num_folds-1}")
 
     def _get_loso_data(self, data_map, subject_id, partition):
@@ -945,6 +1036,9 @@ class MMRActionData(Dataset):
         Raises:
             ValueError: If subject_id is not found in data_map
         """
+        logging.info(f"Extracting LOSO data: target_subject='{subject_id}', partition='{partition}'")
+        logging.info(f"Available subjects: {list(data_map.keys())}")
+
         if subject_id not in data_map:
             available_subjects = list(data_map.keys())
             raise ValueError(f"Subject ID '{subject_id}' not found in data. "
@@ -973,7 +1067,11 @@ class MMRActionData(Dataset):
 
         # Apply data augmentation to training data if enabled
         if self.use_augmentation:
+            logging.info(f"Applying data augmentation to {len(train_data)} training samples")
             train_data = [self._augment_data(d) for d in train_data]
+            logging.info("✓ Data augmentation completed")
+        else:
+            logging.info("Data augmentation disabled - using original training data")
 
         loso_splits = {
             'train': train_data,
@@ -1091,10 +1189,15 @@ class MMRActionData(Dataset):
         Returns:
             tuple: (data_map, num_samples) where data_map contains splits or subject data
         """
+        logging.info("STARTING RAW DATA PROCESSING")
+        logging.info("=" * 50)
+
         # Use dictionary for subject-based organization (needed for LOSO)
         if self.cross_validation == 'LOSO':
+            logging.info("Using subject-based data structure for LOSO cross-validation")
             data_list = {}
         else:
+            logging.info("Using flat data structure for standard/k-fold splits")
             data_list = []
 
         # Load all raw data files and preserve subject information
@@ -1120,57 +1223,89 @@ class MMRActionData(Dataset):
                 data_list = data_list + data_slice
 
         # Handle action label mapping based on data structure
+        logging.info("Processing action labels and filtering invalid samples...")
         if self.cross_validation == 'LOSO':
             # Process each subject's data separately
+            logging.info(f"Processing {len(data_list)} subjects for LOSO validation")
             for subject_id in data_list:
                 subject_data = data_list[subject_id]
+                samples_before = len(subject_data)
+
                 # Map action labels to class indices
                 if "carelab" in self.raw_data_path:
+                    valid_mappings = 0
                     for data in subject_data:
                         if data['y'] != -1:
                             data['y'] = self.carelab_label_map[data['y']]
+                            valid_mappings += 1
+                    logging.info(f"  {subject_id}: Mapped {valid_mappings}/{samples_before} carelab labels")
                 else:
                     # For non-carelab datasets, use pre-loaded labels
                     # Note: This assumes action_label indexing aligns with data order
+                    mapped_count = 0
                     for i, data in enumerate(subject_data):
                         if i < len(self.action_label):
                             data['y'] = self.action_label[i]
+                            mapped_count += 1
+                    logging.info(f"  {subject_id}: Applied {mapped_count} pre-loaded labels")
 
                 # Filter out invalid samples
                 data_list[subject_id] = [d for d in subject_data if d['y']!=-1 and d['x'].shape[0] > 0]
+                samples_after = len(data_list[subject_id])
+                logging.info(f"  {subject_id}: {samples_before} → {samples_after} samples (filtered {samples_before-samples_after} invalid)")
         else:
             # Process flat data list
+            samples_before = len(data_list)
+
             # Map action labels to class indices
             if "carelab" in self.raw_data_path:
+                valid_mappings = 0
                 for data in data_list:
                     if data['y'] != -1:
                         data['y'] = self.carelab_label_map[data['y']]
+                        valid_mappings += 1
+                logging.info(f"Mapped {valid_mappings}/{samples_before} carelab action labels")
             else:
                 # Use pre-loaded action labels for other datasets
+                mapped_count = 0
                 for i, data in enumerate(data_list):
                     if i < len(self.action_label):
                         data['y'] = self.action_label[i]
+                        mapped_count += 1
+                logging.info(f"Applied {mapped_count} pre-loaded action labels")
 
             # Filter out invalid samples
             data_list = [d for d in data_list if d['y']!=-1 and d['x'].shape[0] > 0]
+            samples_after = len(data_list)
+            logging.info(f"Filtered samples: {samples_before} → {samples_after} (removed {samples_before-samples_after} invalid)")
 
         # Apply temporal frame stacking and padding
+        logging.info("Applying frame stacking and padding...")
         if self.cross_validation == 'LOSO':
             # Apply to each subject's data
+            subject_counts_before = {k: len(v) for k, v in data_list.items()}
             data_list = {k: self.stack_and_padd_frames(v) for k, v in data_list.items()}
             num_samples = sum(len(v) for v in data_list.values())
+            logging.info(f"Processed {len(data_list)} subjects:")
+            for subject, count in subject_counts_before.items():
+                logging.info(f"  {subject}: {count} samples")
         else:
+            samples_before = len(data_list)
             data_list = self.stack_and_padd_frames(data_list)
             num_samples = len(data_list)
+            logging.info(f"Processed {samples_before} → {num_samples} samples")
 
-        logging.info(f'Loaded {num_samples} data points')
+        logging.info(f'✓ Total processed samples: {num_samples}')
 
         # Update action labels for carelab dataset after filtering
         if "carelab" in self.raw_data_path and self.cross_validation != 'LOSO':
             self.action_label = [d['y'] for d in data_list]
+            logging.info("Updated action labels for carelab dataset")
 
         # Create appropriate data structure based on cross-validation method
+        logging.info("Creating final data structure...")
         if self.cross_validation == 'LOSO':
+            logging.info(f"Returning subject-based data for LOSO ({len(data_list)} subjects)")
             # Return subject-based data map for LOSO
             return data_list, num_samples
         else:
@@ -1181,29 +1316,56 @@ class MMRActionData(Dataset):
             val_data = data_list[train_end:val_end]
             test_data = data_list[val_end:]
 
+            logging.info(f"Created standard splits:")
+            logging.info(f"  Train: {len(train_data)} samples ({len(train_data)/num_samples:.1%})")
+            logging.info(f"  Val:   {len(val_data)} samples ({len(val_data)/num_samples:.1%})")
+            logging.info(f"  Test:  {len(test_data)} samples ({len(test_data)/num_samples:.1%})")
+
             # Randomly shuffle training and validation data for better generalization
             random.seed(self.seed)
             random.shuffle(train_data)
             random.shuffle(val_data)
+            logging.info("Applied random shuffling to train/val data")
 
             data_map = {
                 'train': train_data,
                 'val': val_data,
                 'test': test_data,
             }
+            logging.info("✓ Data processing completed successfully")
+            logging.info("=" * 50)
             return data_map, num_samples
-    
+
     def stack_and_padd_frames(self, data_list):
+        """
+        Apply temporal frame stacking and padding to create fixed-size sequences.
+
+        Args:
+            data_list: List of data samples with 'x' (keypoints) and 'y' (labels)
+
+        Returns:
+            List of processed data samples with 'new_x' field containing stacked frames
+        """
         if self.stacks is None:
+            logging.info("No frame stacking configured, returning original data")
             return data_list
+
+        logging.info(f"Starting frame stacking and padding process...")
+        logging.info(f"Configuration: stacks={self.stacks}, max_points={self.max_points}, padding={self.zero_padding}")
+
         # take multiple frames for each x
         xs = [d['x'] for d in data_list]
         stacked_xs = []
         padded_xs = []
-        print("Stacking and padding frames...")
-        pbar = tqdm(total=len(xs))
+
+        logging.info(f"Processing {len(xs)} data samples with temporal stacking...")
+        pbar = tqdm(total=len(xs), desc="Frame stacking")
 
         if self.zero_padding in ['per_data_point', 'data_point']:
+            logging.info("Using per-data-point padding strategy")
+            zero_frames_added = 0
+            total_frames_processed = 0
+
             for i in range(len(xs)):
                 data_point = []
                 for j in range(self.stacks):
@@ -1211,29 +1373,51 @@ class MMRActionData(Dataset):
                         mydata_slice = xs[i - j]
                         diff = self.max_points - mydata_slice.shape[0]
                         mydata_slice = np.pad(mydata_slice, ((0, max(diff, 0)), (0, 0)), 'constant')
-                        mydata_slice = mydata_slice[np.random.choice(len(mydata_slice), self.max_points, replace=False)]  
+                        mydata_slice = mydata_slice[np.random.choice(len(mydata_slice), self.max_points, replace=False)]
                         data_point.append(mydata_slice)
+                        total_frames_processed += 1
                     else:
                         data_point.append(np.zeros((self.max_points, 4)))
+                        zero_frames_added += 1
                 padded_xs.append(np.concatenate(data_point, axis=0))
                 pbar.update(1)
+
+            logging.info(f"Per-data-point stacking completed: {total_frames_processed} real frames, {zero_frames_added} zero-padded frames")
         elif self.zero_padding in ['per_stack', 'stack']:
+            logging.info("Using per-stack padding strategy")
+            total_frames_stacked = 0
+
+            # First phase: stack frames
             for i in range(len(xs)):
                 start = max(0, i - self.stacks)
                 while self.action_label[i] != self.action_label[start]:
                     start = start + 1
+                frames_in_stack = i - start + 1
+                total_frames_stacked += frames_in_stack
                 stacked_xs.append(np.concatenate(xs[start:i+1], axis=0))
                 pbar.update(0.5)
+
+            logging.info(f"Stacking phase completed: {total_frames_stacked} total frames in {len(stacked_xs)} stacks")
+
+            # Second phase: apply padding
             for x in stacked_xs:
+                original_length = x.shape[0]
                 diff = self.max_points * self.stacks - x.shape[0]
                 x = np.pad(x, ((0, max(diff, 0)), (0, 0)), 'constant')
-                x = x[np.random.choice(len(x), self.max_points * self.stacks, replace=False)]  
+                x = x[np.random.choice(len(x), self.max_points * self.stacks, replace=False)]
                 padded_xs.append(x)
                 pbar.update(0.5)
+
+            logging.info(f"Padding phase completed: sequences padded/sampled to {self.max_points * self.stacks} points each")
+
         else:
-            raise NotImplementedError()
+            logging.error(f"Unknown zero_padding strategy: {self.zero_padding}")
+            raise NotImplementedError(f"Zero padding strategy '{self.zero_padding}' not implemented")
+
         pbar.close()
-        print("Stacking and padding frames done")
+        logging.info("✓ Frame stacking and padding completed successfully")
+
         # remap padded_xs to data_list
         new_data_list = [{**d, 'new_x': x} for d, x in zip(data_list, padded_xs)]
+        logging.info(f"Created {len(new_data_list)} samples with stacked temporal features")
         return new_data_list
