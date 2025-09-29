@@ -1,0 +1,13 @@
+seed = 20
+raw_data_path = 'data/raw_carelab_zoned'
+processed_data = '/cluster/projects/kite/koorosh/Data/MiliPointCareLab/data/processed_carelab/mmr_action/seed_20_stacks_40_padd_point_task_action.pkl'
+cross_validation = 'loso'
+num_folds = 5
+fold_number = 0
+train_split = 0.8
+val_split = 0.1
+test_split = 0.1
+stacks = 40
+zero_padding = 'per_data_point'
+max_points = 22
+subject_id = 1
