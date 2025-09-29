@@ -9,3 +9,5 @@ val_split = 0.1
 test_split = 0.1
 stacks = 40
 zero_padding = 'per_data_point'
+max_points = 22
+subject_id = 1
