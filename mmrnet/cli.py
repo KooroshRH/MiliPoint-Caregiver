@@ -219,6 +219,7 @@ class Main:
         }
         mmr_dataset_config = {
             'raw_data_path': a.dataset_raw_data_path,
+            'subject_id': a.dataset_subject_id,
             'seed': a.dataset_seed,
             'train_split': a.dataset_train_split,
             'val_split': a.dataset_val_split,
