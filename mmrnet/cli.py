@@ -117,7 +117,7 @@ class Main:
             'type': str, 'default': None, 'help': 'The target fold number for the session.',
         },
         ('-d_subject_id', '--dataset_subject_id'): {
-            'type': str, 'default': None, 'help': 'The target subject ID for the session.',
+            'type': int, 'default': None, 'help': 'The target subject ID for the session.',
         },
         ('-d_forced_rewrite', '--dataset_forced_rewrite'): {
             'action': 'store_true', 'help': 'Force to rewrite the processed data.',
