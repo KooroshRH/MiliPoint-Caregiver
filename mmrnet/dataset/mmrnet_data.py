@@ -812,16 +812,25 @@ class MMRActionData(Dataset):
 
         # Apply cross-validation splits if specified
         if self.cross_validation == 'LOSO':
-            # Leave-One-Subject-Out cross-validation
-            self.data = self._get_loso_data(self.data, self.subject_id, partition)
+            # For LOSO, we need to reconstruct subject-based grouping from processed data
+            if isinstance(self.data, dict) and 'train' in self.data:
+                # Reconstruct subject-based data from train/val/test splits
+                all_samples = self.data['train'] + self.data['val'] + self.data['test']
+                subject_grouped_data = self._group_samples_by_subject(all_samples)
+                self.data = self._get_loso_data(subject_grouped_data, self.subject_id, partition)
+            else:
+                # Data is already in subject-based format
+                self.data = self._get_loso_data(self.data, self.subject_id, partition)
         elif self.cross_validation == '5-fold':
             # K-fold cross-validation
             self.kf = KFold(n_splits=self.num_folds, shuffle=True, random_state=self.seed)
             self.data = self._get_fold_data(self.data, self.fold_number, partition)
         else:
             # Standard train/val/test split
-            total_samples = len(self.data['train']) + len(self.data['val']) + len(self.data['test'])
-            self.data = self.data[partition]
+            if isinstance(self.data, dict) and 'train' in self.data:
+                self.data = self.data[partition]
+            else:
+                raise ValueError("Processed data format not compatible with standard train/val/test split")
 
         # Apply class balancing and augmentation for training data
         if partition == 'train':
@@ -922,20 +931,84 @@ class MMRActionData(Dataset):
         raise ValueError(f"Invalid fold_number: {fold_number}. Must be between 0 and {self.num_folds-1}")
 
     def _get_loso_data(self, data_map, subject_id, partition):
+        """
+        Extract data for Leave-One-Subject-Out cross-validation.
+
+        Args:
+            data_map: Dictionary with subject IDs as keys and data lists as values
+            subject_id: ID of the subject to leave out for testing
+            partition: Which partition to return ('train', 'val', or 'test')
+
+        Returns:
+            List of data samples for the specified partition
+
+        Raises:
+            ValueError: If subject_id is not found in data_map
+        """
+        if subject_id not in data_map:
+            available_subjects = list(data_map.keys())
+            raise ValueError(f"Subject ID '{subject_id}' not found in data. "
+                           f"Available subjects: {available_subjects}")
+
         train_data = []
-        val_data = []
         test_data = []
+
+        # Separate target subject's data (for testing) from other subjects (for training)
         for key in data_map:
-            if key.startswith(subject_id):
+            if key == subject_id:
                 test_data.extend(data_map[key])
             else:
                 train_data.extend(data_map[key])
+
+        if len(test_data) == 0:
+            raise ValueError(f"No data found for target subject '{subject_id}'")
+
+        if len(train_data) == 0:
+            raise ValueError("No training data available (all data belongs to target subject)")
+
+        # Split test data 50/50 into validation and test sets
         val_end = int(len(test_data) * 0.5)
         val_data = test_data[:val_end]
         test_data = test_data[val_end:]
+
+        # Apply data augmentation to training data if enabled
         if self.use_augmentation:
             train_data = [self._augment_data(d) for d in train_data]
-        return {'train': train_data, 'val': val_data, 'test': test_data}[partition]
+
+        loso_splits = {
+            'train': train_data,
+            'val': val_data,
+            'test': test_data
+        }
+
+        logging.info(f"LOSO split for subject '{subject_id}': "
+                    f"train={len(train_data)}, val={len(val_data)}, test={len(test_data)}")
+
+        return loso_splits[partition]
+
+    def _group_samples_by_subject(self, all_samples):
+        """
+        Group samples by subject_id for LOSO cross-validation.
+
+        Args:
+            all_samples: List of data samples, each containing 'subject_id'
+
+        Returns:
+            Dictionary with subject_ids as keys and lists of samples as values
+        """
+        subject_grouped = {}
+
+        for sample in all_samples:
+            if 'subject_id' not in sample:
+                raise ValueError("Sample missing 'subject_id'. Cannot perform LOSO cross-validation.")
+
+            subject_id = sample['subject_id']
+            if subject_id not in subject_grouped:
+                subject_grouped[subject_id] = []
+            subject_grouped[subject_id].append(sample)
+
+        logging.info(f"Grouped samples by subject: {[(k, len(v)) for k, v in subject_grouped.items()]}")
+        return subject_grouped
 
     def len(self):
         return self.num_samples
@@ -1009,65 +1082,116 @@ class MMRActionData(Dataset):
         Process raw action data files and create train/val/test splits.
 
         This method:
-        1. Loads data from pickle files
+        1. Loads data from pickle files (grouped by subject for LOSO support)
         2. Maps action names to class indices using carelab_label_map
         3. Filters invalid samples (y=-1 or empty keypoint sequences)
         4. Applies frame stacking for temporal modeling
-        5. Creates train/validation/test partitions
+        5. Creates train/validation/test partitions or subject-based data for LOSO
 
         Returns:
-            tuple: (data_map, num_samples) where data_map contains train/val/test splits
+            tuple: (data_map, num_samples) where data_map contains splits or subject data
         """
-        data_list = []
+        # Use dictionary for subject-based organization (needed for LOSO)
+        if self.cross_validation == 'LOSO':
+            data_list = {}
+        else:
+            data_list = []
 
-        # Load all raw data files
+        # Load all raw data files and preserve subject information
         for fn in self.raw_file_names:
             logging.info(f'Loading {fn}')
             with open(fn, 'rb') as f:
                 data_slice = pickle.load(f)
-            data_list = data_list + data_slice
 
-        # Map action labels to class indices
-        if "carelab" in self.raw_data_path:
-            # Use carelab label mapping for healthcare actions
-            for data in data_list:
-                if data['y'] != -1:
-                    data['y'] = self.carelab_label_map[data['y']]
+            # Extract subject ID from filename
+            subject_id = os.path.basename(fn).split('_')[0]
+
+            # Add subject_id to each sample to preserve subject information
+            for sample in data_slice:
+                sample['subject_id'] = subject_id
+
+            if self.cross_validation == 'LOSO':
+                # Group by subject for LOSO
+                if subject_id not in data_list:
+                    data_list[subject_id] = []
+                data_list[subject_id].extend(data_slice)
+            else:
+                # Flat list for regular train/val/test splits
+                data_list = data_list + data_slice
+
+        # Handle action label mapping based on data structure
+        if self.cross_validation == 'LOSO':
+            # Process each subject's data separately
+            for subject_id in data_list:
+                subject_data = data_list[subject_id]
+                # Map action labels to class indices
+                if "carelab" in self.raw_data_path:
+                    for data in subject_data:
+                        if data['y'] != -1:
+                            data['y'] = self.carelab_label_map[data['y']]
+                else:
+                    # For non-carelab datasets, use pre-loaded labels
+                    # Note: This assumes action_label indexing aligns with data order
+                    for i, data in enumerate(subject_data):
+                        if i < len(self.action_label):
+                            data['y'] = self.action_label[i]
+
+                # Filter out invalid samples
+                data_list[subject_id] = [d for d in subject_data if d['y']!=-1 and d['x'].shape[0] > 0]
         else:
-            # Use pre-loaded action labels for other datasets
-            for i, data in enumerate(data_list):
-                data['y'] = self.action_label[i]
+            # Process flat data list
+            # Map action labels to class indices
+            if "carelab" in self.raw_data_path:
+                for data in data_list:
+                    if data['y'] != -1:
+                        data['y'] = self.carelab_label_map[data['y']]
+            else:
+                # Use pre-loaded action labels for other datasets
+                for i, data in enumerate(data_list):
+                    if i < len(self.action_label):
+                        data['y'] = self.action_label[i]
 
-        # Filter out invalid samples (no action label or empty keypoint data)
-        data_list = [d for d in data_list if d['y']!=-1 and d['x'].shape[0] > 0]
-
-        # Update action labels for carelab dataset after filtering
-        if "carelab" in self.raw_data_path:
-            self.action_label = [d['y'] for d in data_list]
+            # Filter out invalid samples
+            data_list = [d for d in data_list if d['y']!=-1 and d['x'].shape[0] > 0]
 
         # Apply temporal frame stacking and padding
-        data_list = self.stack_and_padd_frames(data_list)
-        num_samples = len(data_list)
+        if self.cross_validation == 'LOSO':
+            # Apply to each subject's data
+            data_list = {k: self.stack_and_padd_frames(v) for k, v in data_list.items()}
+            num_samples = sum(len(v) for v in data_list.values())
+        else:
+            data_list = self.stack_and_padd_frames(data_list)
+            num_samples = len(data_list)
+
         logging.info(f'Loaded {num_samples} data points')
 
-        # Create train/validation/test splits
-        train_end = int(self.partitions[0] * num_samples)
-        val_end = train_end + int(self.partitions[1] * num_samples)
-        train_data = data_list[:train_end]
-        val_data = data_list[train_end:val_end]
-        test_data = data_list[val_end:]
+        # Update action labels for carelab dataset after filtering
+        if "carelab" in self.raw_data_path and self.cross_validation != 'LOSO':
+            self.action_label = [d['y'] for d in data_list]
 
-        # Randomly shuffle training and validation data for better generalization
-        random.seed(self.seed)
-        random.shuffle(train_data)
-        random.shuffle(val_data)
+        # Create appropriate data structure based on cross-validation method
+        if self.cross_validation == 'LOSO':
+            # Return subject-based data map for LOSO
+            return data_list, num_samples
+        else:
+            # Create train/validation/test splits
+            train_end = int(self.partitions[0] * num_samples)
+            val_end = train_end + int(self.partitions[1] * num_samples)
+            train_data = data_list[:train_end]
+            val_data = data_list[train_end:val_end]
+            test_data = data_list[val_end:]
 
-        data_map = {
-            'train': train_data,
-            'val': val_data,
-            'test': test_data,
-        }
-        return data_map, num_samples
+            # Randomly shuffle training and validation data for better generalization
+            random.seed(self.seed)
+            random.shuffle(train_data)
+            random.shuffle(val_data)
+
+            data_map = {
+                'train': train_data,
+                'val': val_data,
+                'test': test_data,
+            }
+            return data_map, num_samples
     
     def stack_and_padd_frames(self, data_list):
         if self.stacks is None:
