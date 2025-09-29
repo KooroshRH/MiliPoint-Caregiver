@@ -887,22 +887,39 @@ class MMRActionData(Dataset):
             f'Loaded {partition} data with {self.num_samples} samples,')
 
     def _get_fold_data(self, data_map, fold_number, partition):
-        fold_data = {'train': [], 'val': [], 'test': []}
-        for fold, (train_idx, test_idx) in enumerate(self.kf.split(data_map['train'] + data_map['val'] + data_map['test'])):
+        """
+        Extract data for a specific fold in K-fold cross-validation.
+
+        Args:
+            data_map: Dictionary containing train/val/test data splits
+            fold_number: Index of the fold to extract (0-based)
+            partition: Which partition to return ('train', 'val', or 'test')
+
+        Returns:
+            List of data samples for the specified partition and fold
+        """
+        # Flatten all data into a single list for proper k-fold splitting
+        all_data = data_map['train'] + data_map['val'] + data_map['test']
+
+        # Apply KFold to the flattened data
+        for fold, (train_idx, test_idx) in enumerate(self.kf.split(all_data)):
             if fold == fold_number:
-                train_data = [data_map['train'][i] for i in train_idx if i < len(data_map['train'])] + \
-                             [data_map['val'][i - len(data_map['train'])] for i in train_idx if len(data_map['train']) <= i < len(data_map['train']) + len(data_map['val'])] + \
-                             [data_map['test'][i - len(data_map['train']) - len(data_map['val'])] for i in train_idx if i >= len(data_map['train']) + len(data_map['val'])]
-                test_data = [data_map['train'][i] for i in test_idx if i < len(data_map['train'])] + \
-                            [data_map['val'][i - len(data_map['train'])] for i in test_idx if len(data_map['train']) <= i < len(data_map['train']) + len(data_map['val'])] + \
-                            [data_map['test'][i - len(data_map['train']) - len(data_map['val'])] for i in test_idx if i >= len(data_map['train']) + len(data_map['val'])]
+                # Extract train and test data using the indices
+                train_data = [all_data[i] for i in train_idx]
+                test_data = [all_data[i] for i in test_idx]
+
+                # Split test data 50/50 into validation and test sets
                 val_end = int(len(test_data) * 0.5)
 
-                fold_data['train'] = train_data
-                fold_data['val'] = test_data[:val_end]
-                fold_data['test'] = test_data[val_end:]
-                break
-        return fold_data[partition]
+                fold_data = {
+                    'train': train_data,
+                    'val': test_data[:val_end],
+                    'test': test_data[val_end:]
+                }
+                return fold_data[partition]
+
+        # This should never happen if fold_number is valid
+        raise ValueError(f"Invalid fold_number: {fold_number}. Must be between 0 and {self.num_folds-1}")
 
     def _get_loso_data(self, data_map, subject_id, partition):
         train_data = []
