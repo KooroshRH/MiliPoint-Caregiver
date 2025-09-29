@@ -634,45 +634,100 @@ class MMRIdentificationData(Dataset):
         return data_map, num_samples
 
 class MMRActionData(Dataset):
+    """
+    Dataset class for Multi-Modal Recognition (MMR) action recognition tasks.
+
+    This class handles loading, preprocessing, and serving healthcare action data
+    from human pose keypoint sequences. It supports temporal frame stacking,
+    data augmentation, cross-validation, and class balancing.
+
+    Attributes:
+        raw_data_path: Path to raw data files (pickle format)
+        processed_data: Path to save/load preprocessed data
+        carelab_label_map: Mapping from action names to class indices (30 healthcare actions)
+        max_points: Maximum number of keypoints per frame after padding
+        seed: Random seed for reproducibility
+        partitions: Train/validation/test split ratios
+        stacks: Number of consecutive frames to stack for temporal modeling
+        zero_padding: Strategy for padding variable-length sequences
+        num_keypoints: Number of keypoints per frame (17 by default)
+        use_augmentation: Whether to apply data augmentation during training
+    """
+    # Default configuration parameters
     raw_data_path = 'data/raw_carelab_zoned'
     processed_data = 'data/processed/mmr_act/data.pkl'
-    carelab_label_map = {'ABHR_dispensing': 0, 'BP_measurement': 1, 'bed_adjustment': 2, 'bed_rails_down': 3, 'bed_rails_up': 4, 'bed_sitting': 5, 'bedpan_placement': 6, 'coat_assistance': 7, 'curtain_closing': 8, 'curtain_opening': 9, 'door_closing': 10, 'door_opening': 11, 'equipment_cleaning': 12, 'light_control': 13, 'oxygen_saturation_measurement': 14, 'phone_touching': 15, 'pulse_measurement': 16, 'replacing_IV_bag': 17, 'self_touching': 18, 'stethoscope_use': 19, 'table_bed_move': 20, 'table_object_move': 21, 'table_side_move': 22, 'temperature_measurement': 23, 'turning_bed': 24, 'walker_assistance': 25, 'walking_assistance': 26, 'wheelchair_move': 27, 'wheelchair_transfer': 28, 'start-walking': 29, 'walking': 29}
-    max_points = 22
-    seed = 42
-    partitions = (0.8, 0.1, 0.1)
-    stacks = None
-    zero_padding = 'per_data_point'
+
+    # Healthcare action label mapping (30 distinct actions)
+    carelab_label_map = {
+        'ABHR_dispensing': 0, 'BP_measurement': 1, 'bed_adjustment': 2, 'bed_rails_down': 3,
+        'bed_rails_up': 4, 'bed_sitting': 5, 'bedpan_placement': 6, 'coat_assistance': 7,
+        'curtain_closing': 8, 'curtain_opening': 9, 'door_closing': 10, 'door_opening': 11,
+        'equipment_cleaning': 12, 'light_control': 13, 'oxygen_saturation_measurement': 14,
+        'phone_touching': 15, 'pulse_measurement': 16, 'replacing_IV_bag': 17, 'self_touching': 18,
+        'stethoscope_use': 19, 'table_bed_move': 20, 'table_object_move': 21, 'table_side_move': 22,
+        'temperature_measurement': 23, 'turning_bed': 24, 'walker_assistance': 25,
+        'walking_assistance': 26, 'wheelchair_move': 27, 'wheelchair_transfer': 28,
+        'start-walking': 29, 'walking': 29
+    }
+
+    # Data processing parameters
+    max_points = 22  # Maximum keypoints per frame after padding
+    seed = 42  # Random seed for reproducibility
+    partitions = (0.8, 0.1, 0.1)  # Train/val/test splits
+    stacks = None  # Number of frames to stack (None = single frame)
+    zero_padding = 'per_data_point'  # Padding strategy
     zero_padding_styles = ['per_data_point', 'per_stack', 'data_point', 'stack']
-    num_keypoints = 17
-    forced_rewrite = False
-    cross_validation = None
-    num_folds = 5
-    fold_number = 0
-    subject_id = None
-    use_augmentation = False
+    num_keypoints = 17  # Number of pose keypoints per frame
+
+    # Training configuration
+    forced_rewrite = False  # Force reprocessing of data
+    cross_validation = None  # CV method: None, 'LOSO', or '5-fold'
+    num_folds = 5  # Number of folds for k-fold CV
+    fold_number = 0  # Current fold index
+    subject_id = None  # Subject ID for LOSO CV
+    use_augmentation = False  # Enable data augmentation (disabled by default)
 
     def _parse_config(self, c):
+        """
+        Parse and apply configuration parameters from config dictionary.
+
+        Args:
+            c: Configuration dictionary with dataset parameters
+        """
+        # Filter out None values to use defaults
         c = {k: v for k, v in c.items() if v is not None}
+
+        # Apply configuration parameters with fallback to class defaults
         self.seed = c.get('seed', self.seed)
         self.raw_data_path = c.get('raw_data_path', self.raw_data_path)
         self.processed_data = c.get('processed_data', self.processed_data)
         self.max_points = c.get('max_points', self.max_points)
+
+        # Parse train/validation/test split ratios
         self.partitions = (
             c.get('train_split', self.partitions[0]),
             c.get('val_split', self.partitions[1]),
             c.get('test_split', self.partitions[2]))
+
+        # Temporal and preprocessing parameters
         self.stacks = c.get('stacks', self.stacks)
         self.zero_padding = c.get('zero_padding', self.zero_padding)
         self.num_keypoints = c.get('num_keypoints', self.num_keypoints)
+
+        # Validate zero padding style
         if self.zero_padding not in self.zero_padding_styles:
             raise ValueError(
                 f'Zero padding style {self.zero_padding} not supported.')
+
+        # Cross-validation and training parameters
         self.forced_rewrite = c.get('forced_rewrite', self.forced_rewrite)
         self.cross_validation = c.get('cross_validation', self.cross_validation)
         self.num_folds = c.get('num_folds', self.num_folds)
         self.fold_number = c.get('fold_number', self.fold_number)
         self.subject_id = c.get('subject_id', self.subject_id)
         self.use_augmentation = c.get('use_augmentation', self.use_augmentation)
+
+        # Override with fixed value for consistency
         self.num_keypoints = 17
         print(self.raw_data_path)
 
@@ -680,39 +735,62 @@ class MMRActionData(Dataset):
             self, root, partition,
             transform=None, pre_transform=None, pre_filter=None,
             mmr_dataset_config = None):
+        """
+        Initialize the MMRActionData dataset.
+
+        Args:
+            root: Root directory for the dataset
+            partition: Data partition to load ('train', 'val', or 'test')
+            transform: Optional transform to apply to samples
+            pre_transform: Optional transform to apply during preprocessing
+            pre_filter: Optional filter to apply during preprocessing
+            mmr_dataset_config: Configuration dictionary for dataset parameters
+        """
         super(MMRActionData, self).__init__(
             root, transform, pre_transform, pre_filter)
         self._parse_config(mmr_dataset_config)
 
+        # Initialize action labels based on dataset type
         if "carelab" in self.raw_data_path:
-            self.action_label = []
+            self.action_label = []  # Will be populated during processing
         else:
+            # Load pre-computed action labels for non-carelab datasets
             self.action_label = np.load('./data/raw/action_label.npy')
 
+        # Define data augmentation transforms (applied only if use_augmentation=True)
         self.augment = T.Compose([
-            T.RandomHorizontalFlip(),
-            T.RandomVerticalFlip(),
-            T.Lambda(lambda x: x + torch.randn_like(x) * 0.01)  # Add random noise
+            T.RandomHorizontalFlip(),  # Horizontal flip augmentation
+            T.RandomVerticalFlip(),    # Vertical flip augmentation
+            T.Lambda(lambda x: x + torch.randn_like(x) * 0.01)  # Small Gaussian noise
         ])
 
-        # check if processed_data exists
+        # Load or process data
         if (not os.path.isfile(self.processed_data)) or self.forced_rewrite:
+            # Process raw data and save to disk
             self.data, _ = self._process()
             with open(self.processed_data, 'wb') as f:
                 pickle.dump(self.data, f)
         else:
+            # Load preprocessed data from disk
             with open(self.processed_data, 'rb') as f:
                 self.data = pickle.load(f)
+
+        # Apply cross-validation splits if specified
         if self.cross_validation == 'LOSO':
+            # Leave-One-Subject-Out cross-validation
             self.data = self._get_loso_data(self.data, self.subject_id, partition)
         elif self.cross_validation == '5-fold':
+            # K-fold cross-validation
             self.kf = KFold(n_splits=self.num_folds, shuffle=True, random_state=self.seed)
             self.data = self._get_fold_data(self.data, self.fold_number, partition)
         else:
+            # Standard train/val/test split
             total_samples = len(self.data['train']) + len(self.data['val']) + len(self.data['test'])
             self.data = self.data[partition]
 
+        # Apply class balancing and augmentation for training data
         if partition == 'train':
+            # Count samples per class
             class_counts = {}
             for data in self.data:
                 label = data['y']
@@ -720,26 +798,35 @@ class MMRActionData(Dataset):
                     class_counts[label] = 0
                 class_counts[label] += 1
 
+            # Balance classes by undersampling majority classes
             min_count = min(class_counts.values())
             balanced_data = []
 
             for label, count in class_counts.items():
                 label_data = [d for d in self.data if d['y'] == label]
                 if count > min_count:
+                    # Randomly sample down to minimum class size
                     random.seed(self.seed)
                     label_data = random.sample(label_data, min_count)
                 balanced_data.extend(label_data)
 
             self.data = balanced_data
+
+            # Apply data augmentation if enabled
             if self.use_augmentation:
                 self.data = [self._augment_data(d) for d in self.data]
 
+        # Set final dataset properties
         self.num_samples = len(self.data)
-        self.target_dtype = torch.int64
+        self.target_dtype = torch.int64  # Integer labels for classification
+
+        # Determine number of classes based on dataset type
         if "carelab" in self.raw_data_path:
-            num_classes = 30
+            num_classes = 30  # Fixed number for carelab dataset
         else:
-            num_classes = len(np.unique(self.action_label))-1 # except -1
+            num_classes = len(np.unique(self.action_label))-1 # Exclude -1 (invalid) labels
+
+        # Store dataset metadata
         self.info = {
             'num_samples': self.num_samples,
             'num_keypoints': self.num_keypoints,
@@ -853,38 +940,59 @@ class MMRActionData(Dataset):
         return data_list
 
     def _process(self):
+        """
+        Process raw action data files and create train/val/test splits.
+
+        This method:
+        1. Loads data from pickle files
+        2. Maps action names to class indices using carelab_label_map
+        3. Filters invalid samples (y=-1 or empty keypoint sequences)
+        4. Applies frame stacking for temporal modeling
+        5. Creates train/validation/test partitions
+
+        Returns:
+            tuple: (data_map, num_samples) where data_map contains train/val/test splits
+        """
         data_list = []
+
+        # Load all raw data files
         for fn in self.raw_file_names:
             logging.info(f'Loading {fn}')
             with open(fn, 'rb') as f:
                 data_slice = pickle.load(f)
             data_list = data_list + data_slice
 
+        # Map action labels to class indices
         if "carelab" in self.raw_data_path:
+            # Use carelab label mapping for healthcare actions
             for data in data_list:
                 if data['y'] != -1:
                     data['y'] = self.carelab_label_map[data['y']]
         else:
+            # Use pre-loaded action labels for other datasets
             for i, data in enumerate(data_list):
                 data['y'] = self.action_label[i]
 
+        # Filter out invalid samples (no action label or empty keypoint data)
         data_list = [d for d in data_list if d['y']!=-1 and d['x'].shape[0] > 0]
 
+        # Update action labels for carelab dataset after filtering
         if "carelab" in self.raw_data_path:
             self.action_label = [d['y'] for d in data_list]
 
+        # Apply temporal frame stacking and padding
         data_list = self.stack_and_padd_frames(data_list)
         num_samples = len(data_list)
         logging.info(f'Loaded {num_samples} data points')
 
-        # get partitions
+        # Create train/validation/test splits
         train_end = int(self.partitions[0] * num_samples)
         val_end = train_end + int(self.partitions[1] * num_samples)
         train_data = data_list[:train_end]
         val_data = data_list[train_end:val_end]
         test_data = data_list[val_end:]
 
-        # #random shuffle train and val data
+        # Randomly shuffle training and validation data for better generalization
         random.seed(self.seed)
         random.shuffle(train_data)
         random.shuffle(val_data)
