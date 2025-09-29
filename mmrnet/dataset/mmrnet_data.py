@@ -693,39 +693,74 @@ class MMRActionData(Dataset):
 
         Args:
             c: Configuration dictionary with dataset parameters
+
+        Raises:
+            ValueError: If required configuration parameters are missing
         """
-        # Filter out None values to use defaults
+        if c is None:
+            raise ValueError("Configuration dictionary is required for MMRActionData")
+
+        # Define mandatory parameters
+        mandatory_params = [
+            'seed', 'raw_data_path', 'processed_data', 'max_points', 'stacks',
+            'cross_validation', 'num_folds', 'fold_number', 'subject_id'
+        ]
+
+        # Check for missing mandatory parameters
+        missing_params = []
+        for param in mandatory_params:
+            if param not in c or c[param] is None:
+                missing_params.append(param)
+
+        if missing_params:
+            raise ValueError(f"Missing mandatory configuration parameters: {missing_params}")
+
+        # Filter out None values to use defaults for optional parameters
         c = {k: v for k, v in c.items() if v is not None}
 
-        # Apply configuration parameters with fallback to class defaults
-        self.seed = c.get('seed', self.seed)
-        self.raw_data_path = c.get('raw_data_path', self.raw_data_path)
-        self.processed_data = c.get('processed_data', self.processed_data)
-        self.max_points = c.get('max_points', self.max_points)
+        # Apply mandatory configuration parameters (no fallbacks)
+        self.seed = c['seed']
+        self.raw_data_path = c['raw_data_path']
+        self.processed_data = c['processed_data']
+        self.max_points = c['max_points']
+        self.stacks = c['stacks']
 
-        # Parse train/validation/test split ratios
+        # Cross-validation parameters (mandatory)
+        self.cross_validation = c['cross_validation']
+        self.num_folds = c['num_folds']
+        self.fold_number = c['fold_number']
+        self.subject_id = c['subject_id']
+
+        # Validate cross-validation configuration
+        if self.cross_validation not in [None, 'LOSO', '5-fold']:
+            raise ValueError(f"Invalid cross_validation method: {self.cross_validation}. "
+                           "Must be None, 'LOSO', or '5-fold'")
+
+        if self.cross_validation == 'LOSO' and not self.subject_id:
+            raise ValueError("subject_id is required when cross_validation='LOSO'")
+
+        if self.cross_validation == '5-fold':
+            if self.num_folds < 2:
+                raise ValueError("num_folds must be >= 2 for 5-fold cross-validation")
+            if self.fold_number < 0 or self.fold_number >= self.num_folds:
+                raise ValueError(f"fold_number must be between 0 and {self.num_folds-1}")
+
+        # Parse train/validation/test split ratios (optional, use defaults if not provided)
         self.partitions = (
             c.get('train_split', self.partitions[0]),
             c.get('val_split', self.partitions[1]),
             c.get('test_split', self.partitions[2]))
 
-        # Temporal and preprocessing parameters
-        self.stacks = c.get('stacks', self.stacks)
+        # Optional parameters with fallbacks
         self.zero_padding = c.get('zero_padding', self.zero_padding)
         self.num_keypoints = c.get('num_keypoints', self.num_keypoints)
+        self.forced_rewrite = c.get('forced_rewrite', self.forced_rewrite)
+        self.use_augmentation = c.get('use_augmentation', self.use_augmentation)
 
         # Validate zero padding style
         if self.zero_padding not in self.zero_padding_styles:
             raise ValueError(
                 f'Zero padding style {self.zero_padding} not supported.')
-
-        # Cross-validation and training parameters
-        self.forced_rewrite = c.get('forced_rewrite', self.forced_rewrite)
-        self.cross_validation = c.get('cross_validation', self.cross_validation)
-        self.num_folds = c.get('num_folds', self.num_folds)
-        self.fold_number = c.get('fold_number', self.fold_number)
-        self.subject_id = c.get('subject_id', self.subject_id)
-        self.use_augmentation = c.get('use_augmentation', self.use_augmentation)
 
         # Override with fixed value for consistency
         self.num_keypoints = 17
@@ -797,7 +832,10 @@ class MMRActionData(Dataset):
                 if label not in class_counts:
                     class_counts[label] = 0
                 class_counts[label] += 1
-
+            
+            print("Number of samples per class before balancing:")
+            for label, count in class_counts.items():
+                print(f"Class {label}: {count}")
             # Balance classes by undersampling majority classes
             min_count = min(class_counts.values())
             balanced_data = []
@@ -811,6 +849,16 @@ class MMRActionData(Dataset):
                 balanced_data.extend(label_data)
 
             self.data = balanced_data
+            # Print class distribution after balancing
+            balanced_class_counts = {}
+            for data in self.data:
+                label = data['y']
+                if label not in balanced_class_counts:
+                    balanced_class_counts[label] = 0
+                balanced_class_counts[label] += 1
+
+            for label, count in balanced_class_counts.items():
+                print(f"Class {label}: {count}")
 
             # Apply data augmentation if enabled
             if self.use_augmentation:
