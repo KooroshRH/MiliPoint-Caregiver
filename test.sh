@@ -21,4 +21,4 @@ module load python3/3.10.9
 
 source milenv/bin/activate
 
-python mm.py test mmr_act pointnet-film --load pointnet-film_stack40_act -config ./configs/action/mmr_action_stack_40_point_carelab_5fold_0.toml -w 0 -a gpu
+python mm.py test mmr_act pointnet-film --load pointnet-film_stack40_act -config ./configs/action/mmr_action_stack_40_point_carelab_loso_1.toml -w 0 -a gpu

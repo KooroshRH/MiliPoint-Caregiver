@@ -22,4 +22,4 @@ module load python3/3.10.9
 
 source milenv/bin/activate
 
-python mm.py train mmr_act pointnet-film --save-name pointnet-film_stack40_act -config ./configs/action/mmr_action_stack_40_point_carelab_loso_1.toml -a gpu
+python mm.py train mmr_act pointnet-film --save-name pointnet-film_stack40_act -config ./configs/action/mmr_action_stack_40_point_carelab_loso_1.toml -a gpu -lr 1e-3
