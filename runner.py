@@ -192,9 +192,9 @@ Examples:
                         help='Task name for processed data filename')
     parser.add_argument('--cross-validation', type=str, default='LOSO', action=MultiValueAction,
                         help='Cross validation method (comma-separated for grid search)')
-    parser.add_argument('--num-folds', type=int, default='5', action=MultiNumericAction, value_type=int,
+    parser.add_argument('--num-folds', type=str, default='5', action=MultiNumericAction, value_type=int,
                         help='Number of folds (comma-separated for grid search)')
-    parser.add_argument('--fold-number', type=int, default='0', action=MultiNumericAction, value_type=int,
+    parser.add_argument('--fold-number', type=str, default='0', action=MultiNumericAction, value_type=int,
                         help='Fold number (comma-separated for grid search)')
     parser.add_argument('--train-split', type=str, default='0.8', action=MultiNumericAction, value_type=float,
                         help='Training split ratio (comma-separated for grid search)')
@@ -202,13 +202,13 @@ Examples:
                         help='Validation split ratio (comma-separated for grid search)')
     parser.add_argument('--test-split', type=str, default='0.1', action=MultiNumericAction, value_type=float,
                         help='Test split ratio (comma-separated for grid search)')
-    parser.add_argument('--stacks', type=int, default='40', action=MultiNumericAction, value_type=int,
+    parser.add_argument('--stacks', type=str, default='40', action=MultiNumericAction, value_type=int,
                         help='Number of stacks (comma-separated for grid search)')
     parser.add_argument('--zero-padding', type=str, default='per_data_point', action=MultiValueAction,
                         help='Zero padding method (comma-separated for grid search)')
-    parser.add_argument('--max-points', type=int, default='22', action=MultiNumericAction, value_type=int,
+    parser.add_argument('--max-points', type=str, default='22', action=MultiNumericAction, value_type=int,
                         help='Maximum number of points (comma-separated for grid search)')
-    parser.add_argument('--subject-id', type=int, default='20', action=MultiNumericAction, value_type=int,
+    parser.add_argument('--subject-id', type=str, default='20', action=MultiNumericAction, value_type=int,
                         help='Subject ID (comma-separated for grid search)')
     
     # Training parameters - with grid search support

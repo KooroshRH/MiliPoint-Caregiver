@@ -111,10 +111,10 @@ class Main:
             'type': str, 'default': None, 'help': 'cross validation type',
         },
         ('-d_num_folds', '--dataset_num_folds'): {
-            'type': str, 'default': None, 'help': 'Number of total folds for the cross validation.',
+            'type': int, 'default': None, 'help': 'Number of total folds for the cross validation.',
         },
         ('-d_fold_number', '--dataset_fold_number'): {
-            'type': str, 'default': None, 'help': 'The target fold number for the session.',
+            'type': int, 'default': None, 'help': 'The target fold number for the session.',
         },
         ('-d_subject_id', '--dataset_subject_id'): {
             'type': int, 'default': None, 'help': 'The target subject ID for the session.',
