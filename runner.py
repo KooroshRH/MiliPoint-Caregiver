@@ -58,11 +58,11 @@ def create_output_paths(args_dict):
     
     # Create checkpoint directory
     checkpoint_dir = os.path.join(args_dict['checkpoint_base'], exp_name)
-    os.makedirs(checkpoint_dir, exist_ok=True)
+    # os.makedirs(checkpoint_dir, exist_ok=True)
     
     # Create output directory for logs
     output_dir = os.path.join(args_dict['output_base'], exp_name)
-    os.makedirs(output_dir, exist_ok=True)
+    # os.makedirs(output_dir, exist_ok=True)
     
     # Create output file path
     output_file = os.path.join(output_dir, f"{exp_name}.out")
