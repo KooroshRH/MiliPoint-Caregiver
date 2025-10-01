@@ -23,6 +23,21 @@ def parse_numeric_list(value_str, value_type):
     values = parse_value(value_str)
     return [value_type(v) for v in values]
 
+def create_processed_data_path(args_dict):
+    """Create dynamic processed data path based on seed, stacks, max_points, and zero_padding."""
+    base_path = args_dict['processed_data_base']
+    seed = args_dict['seed']
+    stacks = args_dict['stacks']
+    max_points = args_dict['max_points']
+    zero_padding = args_dict['zero_padding']
+    task = args_dict['processed_data_task']
+    
+    # Create filename: seed_20_stacks_40_padd_point_task_action.pkl
+    filename = f"seed_{seed}_stacks_{stacks}_maxpts_{max_points}_padd_{zero_padding}_task_{task}.pkl"
+    processed_data_path = os.path.join(base_path, filename)
+    
+    return processed_data_path
+
 def create_output_paths(args_dict):
     """Create checkpoint folder and output file paths based on parameters."""
     
@@ -33,7 +48,13 @@ def create_output_paths(args_dict):
     else:
         cv_info = f"fold{args_dict['fold_number']}"
     
-    exp_name = f"{args_dict['model']}_{args_dict['task']}_seed{args_dict['seed']}_stack{args_dict['stacks']}_{args_dict['cross_validation']}_{cv_info}"
+    # Build comprehensive experiment name with all important parameters
+    exp_name = (f"{args_dict['model']}_{args_dict['task']}_"
+                f"seed{args_dict['seed']}_stack{args_dict['stacks']}_"
+                f"{args_dict['cross_validation']}_{cv_info}_"
+                f"opt{args_dict['optimizer']}_lr{args_dict['learning_rate']}_"
+                f"bs{args_dict['batch_size']}_ep{args_dict['max_epochs']}_"
+                f"wd{args_dict['weight_decay']}")
     
     # Create checkpoint directory
     checkpoint_dir = os.path.join(args_dict['checkpoint_base'], exp_name)
@@ -64,8 +85,14 @@ def generate_slurm_script(args_dict, checkpoint_dir, output_file):
     --dataset_stacks {args_dict['stacks']} \\
     --dataset_zero_padding {args_dict['zero_padding']} \\
     --dataset_max_points {args_dict['max_points']} \\
-    --dataset_subject_id {args_dict['subject_id']} \\
-    --save-name '{checkpoint_dir}'"""
+    --dataset_subject_id {args_dict['subject_id']}"""
+    
+    # Determine if we're in train or test mode
+    mode = args_dict['mode']
+    if mode == 'train':
+        model_path_arg = f"--save-name '{checkpoint_dir}'"
+    else:  # test mode
+        model_path_arg = f"--load '{checkpoint_dir}'"
     
     # Generate SLURM script
     slurm_script = f"""#!/bin/bash
@@ -92,11 +119,15 @@ module load {args_dict['module']}
 
 source {args_dict['venv']}/bin/activate
 
-python {args_dict['script']} {args_dict['command']} {args_dict['task']} {args_dict['model']} \\
-    --save-name {args_dict['save_name']} \\
+python {args_dict['script']} {mode} {args_dict['task']} {args_dict['model']} \\
+    {model_path_arg} \\
     {cmd_args} \\
     -a {args_dict['accelerator']} \\
-    -lr {args_dict['learning_rate']}
+    -opt {args_dict['optimizer']} \\
+    -lr {args_dict['learning_rate']} \\
+    -m {args_dict['max_epochs']} \\
+    -b {args_dict['batch_size']} \\
+    -wd {args_dict['weight_decay']}
 """
     
     return slurm_script
@@ -130,14 +161,20 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  # Single job
+  # Single training job
   python run_slurm_job.py --seed 20 --subject-id 5
   
-  # Grid search over seeds
+  # Single test job
+  python run_slurm_job.py --mode test --seed 20 --subject-id 5
+  
+  # Grid search over seeds (training)
   python run_slurm_job.py --seed 20,42,123
   
   # Grid search over multiple parameters
   python run_slurm_job.py --seed 20,42 --subject-id 1,2,3 --stacks 20,40
+  
+  # Grid search over training parameters
+  python run_slurm_job.py --learning-rate 1e-3,1e-4 --batch-size 64,128 --optimizer adam,adamw
   
   # This will create 2*3*2 = 12 jobs
         """
@@ -148,9 +185,11 @@ Examples:
                         help='Random seed (comma-separated for grid search, e.g., 20,42,123)')
     parser.add_argument('--raw-data-path', type=str, default='data/raw_carelab_zoned',
                         help='Path to raw data')
-    parser.add_argument('--processed-data', type=str, 
-                        default='/cluster/projects/kite/koorosh/Data/MiliPointCareLab/data/processed_carelab/mmr_action/seed_20_stacks_40_padd_point_task_action.pkl',
-                        help='Path to processed data')
+    parser.add_argument('--processed-data-base', type=str, 
+                        default='/cluster/projects/kite/koorosh/Data/MiliPointCareLab/data/processed_carelab/mmr_action',
+                        help='Base path for processed data (will be combined with seed, stacks, max_points, zero_padding)')
+    parser.add_argument('--processed-data-task', type=str, default='action',
+                        help='Task name for processed data filename')
     parser.add_argument('--cross-validation', type=str, default='LOSO', action=MultiValueAction,
                         help='Cross validation method (comma-separated for grid search)')
     parser.add_argument('--num-folds', type=str, default='5', action=MultiNumericAction, value_type=int,
@@ -172,8 +211,20 @@ Examples:
     parser.add_argument('--subject-id', type=str, default='20', action=MultiNumericAction, value_type=int,
                         help='Subject ID (comma-separated for grid search)')
     
+    # Training parameters - with grid search support
+    parser.add_argument('-opt', '--optimizer', type=str, default='adam', action=MultiValueAction,
+                        help='Pick an optimizer (comma-separated for grid search, e.g., adam,adamw,sgd)')
+    parser.add_argument('-lr', '--learning-rate', type=str, default='1e-5', action=MultiNumericAction, value_type=float,
+                        help='Initial learning rate (comma-separated for grid search, e.g., 1e-3,1e-4,1e-5)')
+    parser.add_argument('-m', '--max-epochs', type=str, default='100', action=MultiNumericAction, value_type=int,
+                        help='Maximum number of epochs for training (comma-separated for grid search)')
+    parser.add_argument('-b', '--batch-size', type=str, default='128', action=MultiNumericAction, value_type=int,
+                        help='Batch size for training and evaluation (comma-separated for grid search)')
+    parser.add_argument('-wd', '--weight-decay', type=str, default='1e-5', action=MultiNumericAction, value_type=float,
+                        help='Weight decay for optimizer regularization (comma-separated for grid search)')
+    
     # Directory parameters
-    parser.add_argument('--checkpoint-base', type=str, default='./checkpoints',
+    parser.add_argument('--checkpoint-base', type=str, default='/cluster/projects/kite/koorosh/Output/MiliPointCareLab/checkpoints',
                         help='Base directory for checkpoints')
     parser.add_argument('--output-base', type=str, default='./outputs',
                         help='Base directory for output logs')
@@ -213,18 +264,16 @@ Examples:
     # Python script parameters
     parser.add_argument('--script', type=str, default='mm.py',
                         help='Python script to run')
-    parser.add_argument('--command', type=str, default='train',
-                        help='Command to execute')
+    parser.add_argument('--mode', type=str, default='train', choices=['train', 'test'],
+                        help='Mode: train or test')
     parser.add_argument('--task', type=str, default='mmr_act',
                         help='Task name')
     parser.add_argument('--model', type=str, default='pointnet-film',
                         help='Model name')
     parser.add_argument('--save-name', type=str, default='pointnet-film_stack40_act',
-                        help='Save name for the model')
+                        help='Save name for the model (deprecated, use --mode instead)')
     parser.add_argument('--accelerator', '-a', type=str, default='gpu',
                         help='Accelerator type')
-    parser.add_argument('--learning-rate', '-lr', type=str, default='1e-3', action=MultiNumericAction, value_type=float,
-                        help='Learning rate (comma-separated for grid search)')
     
     # Execution options
     parser.add_argument('--dry-run', action='store_true',
@@ -247,7 +296,11 @@ Examples:
         'zero_padding': args.zero_padding if isinstance(args.zero_padding, list) else [args.zero_padding],
         'max_points': args.max_points if isinstance(args.max_points, list) else [args.max_points],
         'subject_id': args.subject_id if isinstance(args.subject_id, list) else [args.subject_id],
-        'learning_rate': args.learning_rate if isinstance(args.learning_rate, list) else [args.learning_rate]
+        'optimizer': args.optimizer if isinstance(args.optimizer, list) else [args.optimizer],
+        'learning_rate': args.learning_rate if isinstance(args.learning_rate, list) else [args.learning_rate],
+        'max_epochs': args.max_epochs if isinstance(args.max_epochs, list) else [args.max_epochs],
+        'batch_size': args.batch_size if isinstance(args.batch_size, list) else [args.batch_size],
+        'weight_decay': args.weight_decay if isinstance(args.weight_decay, list) else [args.weight_decay]
     }
     
     # Create all combinations
@@ -262,19 +315,20 @@ Examples:
     
     if has_grid_search:
         print(f"Grid search enabled: {total_jobs} job(s) will be created")
+        print(f"Mode: {args.mode}")
         print(f"Parameters with multiple values:")
         for name, values in grid_params.items():
             if len(values) > 1:
                 print(f"  - {name}: {values}")
         print()
         
-        response = input(f"Do you want to proceed with {total_jobs} jobs? (yes/no): ")
+        response = input(f"Do you want to proceed with {total_jobs} {args.mode} jobs? (yes/no): ")
         if response.lower() not in ['yes', 'y']:
             print("Aborted.")
             return
         print()
     else:
-        print(f"Single job will be created")
+        print(f"Single {args.mode} job will be created")
         print()
     
     submitted_jobs = []
@@ -284,7 +338,8 @@ Examples:
         args_dict = {
             'seed': combo[param_names.index('seed')],
             'raw_data_path': args.raw_data_path,
-            'processed_data': args.processed_data,
+            'processed_data_base': args.processed_data_base,
+            'processed_data_task': args.processed_data_task,
             'cross_validation': combo[param_names.index('cross_validation')],
             'num_folds': combo[param_names.index('num_folds')],
             'fold_number': combo[param_names.index('fold_number')],
@@ -295,6 +350,11 @@ Examples:
             'zero_padding': combo[param_names.index('zero_padding')],
             'max_points': combo[param_names.index('max_points')],
             'subject_id': combo[param_names.index('subject_id')],
+            'optimizer': combo[param_names.index('optimizer')],
+            'learning_rate': combo[param_names.index('learning_rate')],
+            'max_epochs': combo[param_names.index('max_epochs')],
+            'batch_size': combo[param_names.index('batch_size')],
+            'weight_decay': combo[param_names.index('weight_decay')],
             'checkpoint_base': args.checkpoint_base,
             'output_base': args.output_base,
             'account': args.account,
@@ -310,13 +370,16 @@ Examples:
             'venv': args.venv,
             'wandb_mode': args.wandb_mode,
             'script': args.script,
-            'command': args.command,
+            'mode': args.mode,
             'task': args.task,
             'model': args.model,
             'save_name': args.save_name,
-            'accelerator': args.accelerator,
-            'learning_rate': combo[param_names.index('learning_rate')]
+            'accelerator': args.accelerator
         }
+        
+        # Create dynamic processed data path
+        processed_data_path = create_processed_data_path(args_dict)
+        args_dict['processed_data'] = processed_data_path
         
         # Create output paths based on important parameters
         checkpoint_dir, output_file, exp_name = create_output_paths(args_dict)
@@ -326,9 +389,10 @@ Examples:
             output_file = args.output
         
         if has_grid_search:
-            print(f"[{idx}/{total_jobs}] Experiment: {exp_name}")
+            print(f"[{idx}/{total_jobs}] {args.mode.upper()} - Experiment: {exp_name}")
         else:
-            print(f"Experiment name: {exp_name}")
+            print(f"{args.mode.upper()} - Experiment name: {exp_name}")
+        print(f"  Processed data: {processed_data_path}")
         print(f"  Checkpoint directory: {checkpoint_dir}")
         print(f"  Output file: {output_file}")
         
@@ -380,7 +444,7 @@ Examples:
         print()
     
     if submitted_jobs and not args.dry_run and not args.output_script:
-        print(f"\nSummary: {len(submitted_jobs)} job(s) submitted successfully!")
+        print(f"\nSummary: {len(submitted_jobs)} {args.mode} job(s) submitted successfully!")
         for exp_name, job_info in submitted_jobs:
             print(f"  - {exp_name}: {job_info}")
 
