@@ -895,47 +895,47 @@ class MMRActionData(Dataset):
             logging.info("APPLYING TRAINING DATA PROCESSING")
             logging.info("-" * 40)
 
-            # Count samples per class
-            class_counts = {}
-            for data in self.data:
-                label = data['y']
-                if label not in class_counts:
-                    class_counts[label] = 0
-                class_counts[label] += 1
+            # # Count samples per class
+            # class_counts = {}
+            # for data in self.data:
+            #     label = data['y']
+            #     if label not in class_counts:
+            #         class_counts[label] = 0
+            #     class_counts[label] += 1
 
-            logging.info(f"Class distribution before balancing ({len(self.data)} total samples):")
-            for label, count in sorted(class_counts.items()):
-                logging.info(f"  Class {label}: {count} samples")
+            # logging.info(f"Class distribution before balancing ({len(self.data)} total samples):")
+            # for label, count in sorted(class_counts.items()):
+            #     logging.info(f"  Class {label}: {count} samples")
 
-            # Balance classes by undersampling majority classes
-            min_count = min(class_counts.values())
-            logging.info(f"Balancing classes to minimum count: {min_count} samples per class")
-            balanced_data = []
+            # # Balance classes by undersampling majority classes
+            # min_count = min(class_counts.values())
+            # logging.info(f"Balancing classes to minimum count: {min_count} samples per class")
+            # balanced_data = []
 
-            for label, count in class_counts.items():
-                label_data = [d for d in self.data if d['y'] == label]
-                if count > min_count:
-                    # Randomly sample down to minimum class size
-                    random.seed(self.seed)
-                    label_data = random.sample(label_data, min_count)
-                    logging.info(f"  Class {label}: undersampled from {count} to {len(label_data)} samples")
-                else:
-                    logging.info(f"  Class {label}: keeping all {count} samples")
-                balanced_data.extend(label_data)
+            # for label, count in class_counts.items():
+            #     label_data = [d for d in self.data if d['y'] == label]
+            #     if count > min_count:
+            #         # Randomly sample down to minimum class size
+            #         random.seed(self.seed)
+            #         label_data = random.sample(label_data, min_count)
+            #         logging.info(f"  Class {label}: undersampled from {count} to {len(label_data)} samples")
+            #     else:
+            #         logging.info(f"  Class {label}: keeping all {count} samples")
+            #     balanced_data.extend(label_data)
 
-            self.data = balanced_data
+            # self.data = balanced_data
 
-            # Verify balanced class distribution
-            balanced_class_counts = {}
-            for data in self.data:
-                label = data['y']
-                if label not in balanced_class_counts:
-                    balanced_class_counts[label] = 0
-                balanced_class_counts[label] += 1
+            # # Verify balanced class distribution
+            # balanced_class_counts = {}
+            # for data in self.data:
+            #     label = data['y']
+            #     if label not in balanced_class_counts:
+            #         balanced_class_counts[label] = 0
+            #     balanced_class_counts[label] += 1
 
-            logging.info(f"Class distribution after balancing ({len(self.data)} total samples):")
-            for label, count in sorted(balanced_class_counts.items()):
-                logging.info(f"  Class {label}: {count} samples")
+            # logging.info(f"Class distribution after balancing ({len(self.data)} total samples):")
+            # for label, count in sorted(balanced_class_counts.items()):
+            #     logging.info(f"  Class {label}: {count} samples")
 
             # Apply data augmentation if enabled
             if self.use_augmentation:
