@@ -56,9 +56,7 @@ class PointNet(torch.nn.Module):
         batchsize = data.shape[0]
         npoints = data.shape[1]
         # Drop the last dimension to convert from (B, N, 4) to (B, N, 3)
-        print(data.shape)
         data = data[:, :, :3]
-        print(data.shape)
         x = data.reshape((batchsize * npoints, 3))
         batch = torch.arange(batchsize).repeat_interleave(npoints).to(x.device)
         sa0_out = (x, x, batch)
