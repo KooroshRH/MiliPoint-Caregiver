@@ -854,24 +854,24 @@ class MMRActionData(Dataset):
         logging.info("APPLYING CROSS-VALIDATION STRATEGY")
         logging.info("-" * 40)
 
-        if self.cross_validation == 'LOSO':
-            logging.info(f"Applying Leave-One-Subject-Out (LOSO) cross-validation")
-            logging.info(f"Target subject for testing: {self.subject_id}")
-            # Data is already in subject-based format from _process()
-            self.data = self._get_loso_data(self.data, self.subject_id, partition)
+        # if self.cross_validation == 'LOSO':
+        #     logging.info(f"Applying Leave-One-Subject-Out (LOSO) cross-validation")
+        #     logging.info(f"Target subject for testing: {self.subject_id}")
+        #     # Data is already in subject-based format from _process()
+        #     self.data = self._get_loso_data(self.data, self.subject_id, partition)
 
-        elif self.cross_validation == '5-fold':
-            logging.info(f"Applying {self.num_folds}-fold cross-validation")
-            logging.info(f"Using fold {self.fold_number} for current partition: {partition}")
+        # elif self.cross_validation == '5-fold':
+        #     logging.info(f"Applying {self.num_folds}-fold cross-validation")
+        #     logging.info(f"Using fold {self.fold_number} for current partition: {partition}")
 
-            # K-fold cross-validation - convert subject-based to flat list first
-            self.kf = KFold(n_splits=self.num_folds, shuffle=True, random_state=self.seed)
-            self.data = self._get_fold_data(self.data, self.fold_number, partition)
+        #     # K-fold cross-validation - convert subject-based to flat list first
+        #     self.kf = KFold(n_splits=self.num_folds, shuffle=True, random_state=self.seed)
+        #     self.data = self._get_fold_data(self.data, self.fold_number, partition)
 
-        else:
-            logging.info("Using standard train/validation/test split")
-            # Standard train/val/test split - convert subject-based to flat list and split
-            self.data = self._get_standard_split(self.data, partition)
+        # else:
+        logging.info("Using standard train/validation/test split")
+        # Standard train/val/test split - convert subject-based to flat list and split
+        self.data = self._get_standard_split(self.data, partition)
 
         # Apply class balancing and augmentation for training data
         if partition == 'train':
