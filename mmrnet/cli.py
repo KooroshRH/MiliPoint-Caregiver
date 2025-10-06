@@ -225,6 +225,9 @@ class Main:
             'forced_rewrite': a.dataset_forced_rewrite,
             'max_points': a.dataset_max_points,
             'num_keypoints': dataset_num_keypoints[a.dataset_num_keypoints],
+            'cross_validation': a.dataset_cross_validation,
+            'num_folds': a.dataset_num_folds,
+            'fold_number': a.dataset_fold_number,
         }
         train_loader, val_loader, test_loader, dataset_info = get_dataset(
             name=a.dataset, 
