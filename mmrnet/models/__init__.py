@@ -7,7 +7,6 @@ from .pointmlp import PointMLP
 from .attdgcnn import AttDGCNN
 from .hybrid_pointnet import HybridPointNet
 from .ensemble_model import EnsembleModel, load_ensemble_from_checkpoint
-from .pointnet_film import PointNetWithFiLM
 
 model_map = {
     'dgcnn': DGCNN,
@@ -17,6 +16,5 @@ model_map = {
     'pointmlp': PointMLP,
     'attdgcnn': AttDGCNN,
     'hybrid': HybridPointNet,
-    'ensemble': EnsembleModel,
-    'pointnet-film': PointNetWithFiLM
+    'ensemble': EnsembleModel
 }
