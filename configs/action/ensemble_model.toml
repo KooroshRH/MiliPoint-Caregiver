@@ -1,0 +1,41 @@
+# Configuration for ensemble model architecture
+name = "ensemble_point_cloud_model"
+
+[dataset]
+processed_data = "data/processed/mmr_act/data_ensemble.pkl"
+seed = 42
+train_split = 0.8
+val_split = 0.1
+test_split = 0.1
+stacks = 10
+zero_padding = "per_data_point"
+max_points = 22
+forced_rewrite = false
+cross_validation = "5-fold"
+num_folds = 5
+fold_number = 0
+raw_data_path = "data/raw_carelab"
+
+[model]
+name = "ensemble"
+k = 30
+aggr = "max"
+model_types = ["dgcnn", "attdgcnn", "hybrid"]
+weights = [0.3, 0.4, 0.3]
+
+[train]
+optimizer = "adamw"
+learning_rate = 0.0005  # Lower learning rate for ensemble model
+weight_decay = 0.0001
+batch_size = 24  # Smaller batch size due to larger model
+num_workers = 4
+epochs = 250
+
+[advanced]
+use_mixup = true
+label_smoothing = 0.1
+focal_loss = true
+scheduler = "cosine_warmup"
+early_stopping = 20  # More patience for ensemble model
+precision = 16
+merge_classes = true

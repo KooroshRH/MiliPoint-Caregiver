@@ -2,7 +2,7 @@
 
 #SBATCH -A kite_gpu
 #SBATCH -t 1:0:0
-#SBATCH --output die_hard_bad_with_good_dataset.out
+#SBATCH --output die_hard_comparison.out
 #SBATCH -p gpu
 #SBATCH --gres=gpu:v100:1
 #SBATCH --nodes 1
@@ -22,4 +22,4 @@ module load python3/3.10.9
 
 source milenv/bin/activate
 
-python mm.py train mmr_act pointnet --save-name die_hard_bad_with_good_dataset -config ./configs/action/mmr_action_stack_40_point_carelab_5fold_0.toml -a gpu -m 400 -lr 1e-3
+python mm.py train mmr_act pointnet --save-name die_hard_comparison -config ./configs/action/mmr_action_stack_40_point_carelab_5fold_0.toml -a gpu -m 400 -lr 1e-3

@@ -1,0 +1,39 @@
+# Configuration for PointNet-FiLM model with zone conditioning
+name = "pointnet_film_zone_conditioned"
+
+[dataset]
+processed_data = "data/processed/mmr_act/data_pointnet_film.pkl"
+seed = 42
+train_split = 0.8
+val_split = 0.1
+test_split = 0.1
+stacks = 10
+zero_padding = "per_data_point"
+max_points = 22
+forced_rewrite = false
+cross_validation = "5-fold"
+num_folds = 5
+fold_number = 0
+raw_data_path = "data/raw_carelab_zoned"  # Use zoned data with zone information
+
+[model]
+name = "pointnet-film"
+zone_dim = 6  # 6 zones: unknown(0), entrance(1), right_side_bed(2), left_side_bed(3), washroom(4), sink(5)
+
+[train]
+optimizer = "adamw"
+learning_rate = 0.001
+weight_decay = 0.0001
+batch_size = 32
+num_workers = 4
+epochs = 300
+
+[advanced]
+use_mixup = true
+mixup_alpha = 0.2
+label_smoothing = 0.1
+focal_loss = true
+scheduler = "one_cycle"
+early_stopping = 15
+precision = 16
+merge_classes = true
