@@ -40,14 +40,14 @@ def create_processed_data_path(args_dict):
 
 def create_output_paths(args_dict):
     """Create checkpoint folder and output file paths based on parameters."""
-    
+
     # Create a descriptive name based on important parameters
     # Use fold_number for k-fold CV, subject_id for LOSO CV
     if args_dict['cross_validation'].upper() == 'LOSO':
         cv_info = f"subj{args_dict['subject_id']}"
     else:
         cv_info = f"fold{args_dict['fold_number']}"
-    
+
     # Build comprehensive experiment name with all important parameters
     exp_name = (f"{args_dict['model']}_{args_dict['task']}_"
                 f"seed{args_dict['seed']}_stack{args_dict['stacks']}_"
@@ -55,18 +55,19 @@ def create_output_paths(args_dict):
                 f"opt{args_dict['optimizer']}_lr{args_dict['learning_rate']}_"
                 f"bs{args_dict['batch_size']}_ep{args_dict['max_epochs']}_"
                 f"wd{args_dict['weight_decay']}")
-    
+
     # Create checkpoint directory
     checkpoint_dir = os.path.join(args_dict['checkpoint_base'], exp_name)
     # os.makedirs(checkpoint_dir, exist_ok=True)
-    
+
     # Create output directory for logs
     output_dir = os.path.join(args_dict['output_base'], exp_name)
     # os.makedirs(output_dir, exist_ok=True)
-    
-    # Create output file path
-    output_file = os.path.join(output_dir, f"{exp_name}.out")
-    
+
+    # Add prefix for test mode output files
+    mode_prefix = "test_" if args_dict['mode'] == 'test' else ""
+    output_file = os.path.join(output_dir, f"{mode_prefix}{exp_name}.out")
+
     return checkpoint_dir, output_file, exp_name
 
 def generate_slurm_script(args_dict, checkpoint_dir, output_file):
