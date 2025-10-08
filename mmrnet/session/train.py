@@ -30,7 +30,7 @@ def train(
         mode=mode,
         filename="best",
         dirpath=save_path,
-        save_last=True,
+        save_last=False,
     )
     plt_trainer_args['callbacks'] = [checkpoint_callback]
     trainer = pl.Trainer(**plt_trainer_args)
