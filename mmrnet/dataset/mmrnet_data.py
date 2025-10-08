@@ -854,24 +854,24 @@ class MMRActionData(Dataset):
         logging.info("APPLYING CROSS-VALIDATION STRATEGY")
         logging.info("-" * 40)
 
-        # if self.cross_validation == 'LOSO':
-        #     logging.info(f"Applying Leave-One-Subject-Out (LOSO) cross-validation")
-        #     logging.info(f"Target subject for testing: {self.subject_id}")
-        #     # Data is already in subject-based format from _process()
-        #     self.data = self._get_loso_data(self.data, self.subject_id, partition)
+        if self.cross_validation == 'LOSO':
+            logging.info(f"Applying Leave-One-Subject-Out (LOSO) cross-validation")
+            logging.info(f"Target subject for testing: {self.subject_id}")
+            # Data is already in subject-based format from _process()
+            self.data = self._get_loso_data(self.data, self.subject_id, partition)
 
-        # elif self.cross_validation == '5-fold':
-        #     logging.info(f"Applying {self.num_folds}-fold cross-validation")
-        #     logging.info(f"Using fold {self.fold_number} for current partition: {partition}")
+        elif self.cross_validation == '5-fold':
+            logging.info(f"Applying {self.num_folds}-fold cross-validation")
+            logging.info(f"Using fold {self.fold_number} for current partition: {partition}")
 
-        #     # K-fold cross-validation - convert subject-based to flat list first
-        #     self.kf = KFold(n_splits=self.num_folds, shuffle=True, random_state=self.seed)
-        #     self.data = self._get_fold_data(self.data, self.fold_number, partition)
+            # K-fold cross-validation - convert subject-based to flat list first
+            self.kf = KFold(n_splits=self.num_folds, shuffle=True, random_state=self.seed)
+            self.data = self._get_fold_data(self.data, self.fold_number, partition)
 
-        # else:
-        logging.info("Using standard train/validation/test split")
-        # Standard train/val/test split - convert subject-based to flat list and split
-        self.data = self._get_standard_split(self.data, partition)
+        else:
+            logging.info("Using standard train/validation/test split")
+            # Standard train/val/test split - convert subject-based to flat list and split
+            self.data = self._get_standard_split(self.data, partition)
 
         # Apply class balancing and augmentation for training data
         if partition == 'train':
@@ -980,10 +980,6 @@ class MMRActionData(Dataset):
         for subject_id, subject_data in data_map.items():
             all_data.extend(subject_data)
         logging.info(f"Total samples for K-fold splitting: {len(all_data)} from {len(data_map)} subjects")
-
-        # Randomly shuffle for better fold distribution
-        random.seed(self.seed)
-        random.shuffle(all_data)
 
         # Apply KFold to the flattened data
         for fold, (train_idx, test_idx) in enumerate(self.kf.split(all_data)):
@@ -1215,9 +1211,13 @@ class MMRActionData(Dataset):
             # Extract subject ID from filename
             subject_id = os.path.basename(fn).split('_')[0]
 
-            # Add subject_id to each sample to preserve subject information
+            # Extract scenario ID from filename
+            scenario_id = os.path.basename(fn).split('_')[1].replace('.pkl', '')
+
+            # Add subject_id and scenario_id to each sample to preserve information
             for sample in data_slice:
                 sample['subject_id'] = subject_id
+                sample['scenario_id'] = scenario_id
 
             # Group by subject
             if subject_id not in data_list:
