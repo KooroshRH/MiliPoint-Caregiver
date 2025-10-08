@@ -965,8 +965,11 @@ class MMRActionData(Dataset):
         """
         Extract data for a specific fold in K-fold cross-validation.
 
+        IMPORTANT: Splits at (subject_id, scenario_id) group level to prevent data leakage.
+        Consecutive samples from the same subject and scenario always stay in the same split.
+
         Args:
-            data_map: Dictionary with subject IDs as keys and data lists as values
+            data_map: Dictionary with (subject_id, scenario_id) keys and data lists as values
             fold_number: Index of the fold to extract (0-based)
             partition: Which partition to return ('train', 'val', or 'test')
 
@@ -975,29 +978,48 @@ class MMRActionData(Dataset):
         """
         logging.info(f"Extracting K-fold data: fold {fold_number}/{self.num_folds}, partition='{partition}'")
 
-        # Flatten subject-based data into a single list
-        all_data = []
-        for subject_id, subject_data in data_map.items():
-            all_data.extend(subject_data)
-        logging.info(f"Total samples for K-fold splitting: {len(all_data)} from {len(data_map)} subjects")
+        # Get list of group keys (subject_id_scenario_id) for group-level splitting
+        group_keys = list(data_map.keys())
+        total_samples = sum(len(data_map[k]) for k in group_keys)
+        logging.info(f"Total groups for K-fold splitting: {len(group_keys)} groups ({total_samples} samples)")
 
-        # Apply KFold to the flattened data
-        for fold, (train_idx, test_idx) in enumerate(self.kf.split(all_data)):
+        # Apply KFold to the group keys (NOT individual samples!) to prevent leakage
+        for fold, (train_group_idx, test_group_idx) in enumerate(self.kf.split(group_keys)):
             if fold == fold_number:
-                # Extract train and test data using the indices
-                train_data = [all_data[i] for i in train_idx]
-                test_data = [all_data[i] for i in test_idx]
+                # Get the group keys for train and test splits
+                train_group_keys = [group_keys[i] for i in train_group_idx]
+                test_group_keys = [group_keys[i] for i in test_group_idx]
 
-                # Split test data 50/50 into validation and test sets
-                val_end = int(len(test_data) * 0.5)
+                # Further split test groups 50/50 into validation and test groups (at group level)
+                random.seed(self.seed)
+                random.shuffle(test_group_keys)
+                val_group_end = len(test_group_keys) // 2
+
+                val_group_keys = test_group_keys[:val_group_end]
+                test_group_keys_final = test_group_keys[val_group_end:]
+
+                # Flatten data from the selected groups
+                train_data = []
+                for key in train_group_keys:
+                    train_data.extend(data_map[key])
+
+                val_data = []
+                for key in val_group_keys:
+                    val_data.extend(data_map[key])
+
+                test_data = []
+                for key in test_group_keys_final:
+                    test_data.extend(data_map[key])
 
                 fold_data = {
                     'train': train_data,
-                    'val': test_data[:val_end],
-                    'test': test_data[val_end:]
+                    'val': val_data,
+                    'test': test_data
                 }
 
-                logging.info(f"K-fold split sizes: train={len(fold_data['train'])}, "
+                logging.info(f"K-fold group split: {len(train_group_keys)} train groups, "
+                           f"{len(val_group_keys)} val groups, {len(test_group_keys_final)} test groups")
+                logging.info(f"K-fold sample sizes: train={len(fold_data['train'])}, "
                            f"val={len(fold_data['val'])}, test={len(fold_data['test'])}")
 
                 return fold_data[partition]
@@ -1008,10 +1030,10 @@ class MMRActionData(Dataset):
 
     def _get_standard_split(self, data_map, partition):
         """
-        Create standard train/val/test splits from subject-based data.
+        Create standard train/val/test splits from (subject_id, scenario_id)-based data.
 
         Args:
-            data_map: Dictionary with subject IDs as keys and data lists as values
+            data_map: Dictionary with (subject_id, scenario_id) keys and data lists as values
             partition: Which partition to return ('train', 'val', or 'test')
 
         Returns:
@@ -1019,12 +1041,12 @@ class MMRActionData(Dataset):
         """
         logging.info(f"Creating standard train/val/test split for partition '{partition}'")
 
-        # Flatten subject-based data into a single list
+        # Flatten group-based data into a single list
         all_data = []
-        for subject_id, subject_data in data_map.items():
-            all_data.extend(subject_data)
+        for group_key, group_data in data_map.items():
+            all_data.extend(group_data)
         num_samples = len(all_data)
-        logging.info(f"Total samples to split: {num_samples} from {len(data_map)} subjects")
+        logging.info(f"Total samples to split: {num_samples} from {len(data_map)} subject-scenario groups")
 
         # Randomly shuffle for better distribution
         random.seed(self.seed)
@@ -1051,8 +1073,11 @@ class MMRActionData(Dataset):
         """
         Extract data for Leave-One-Subject-Out cross-validation.
 
+        IMPORTANT: Works with (subject_id, scenario_id) grouped data.
+        All scenarios from the target subject are used for testing.
+
         Args:
-            data_map: Dictionary with subject IDs as keys and data lists as values
+            data_map: Dictionary with (subject_id, scenario_id) keys and data lists as values
             subject_id: ID of the subject to leave out for testing
             partition: Which partition to return ('train', 'val', or 'test')
 
@@ -1063,23 +1088,28 @@ class MMRActionData(Dataset):
             ValueError: If subject_id is not found in data_map
         """
         logging.info(f"Extracting LOSO data: target_subject='{subject_id}' (type: {type(subject_id)}), partition='{partition}'")
-        logging.info(f"Available subjects: {list(data_map.keys())} (key types: {[type(k) for k in list(data_map.keys())[:3]]})")
+        logging.info(f"Available groups: {list(data_map.keys())[:5]}... (showing first 5)")
 
         # Convert subject_id to string to match the format used in data_map keys
         # (subject IDs are extracted from filenames and stored as strings)
         subject_id = str(subject_id)
 
-        if subject_id not in data_map:
-            available_subjects = list(data_map.keys())
+        # Find all groups (subject_scenario combinations) for the target subject
+        target_groups = [key for key in data_map.keys() if key.startswith(f"{subject_id}_")]
+
+        if len(target_groups) == 0:
+            available_subjects = list(set([k.split('_')[0] for k in data_map.keys()]))
             raise ValueError(f"Subject ID '{subject_id}' not found in data. "
                            f"Available subjects: {available_subjects}")
+
+        logging.info(f"Found {len(target_groups)} scenario groups for subject '{subject_id}': {target_groups}")
 
         train_data = []
         test_data = []
 
-        # Separate target subject's data (for testing) from other subjects (for training)
+        # Separate target subject's data (all scenarios) from other subjects (for training)
         for key in data_map:
-            if key == subject_id:
+            if key.startswith(f"{subject_id}_"):
                 test_data.extend(data_map[key])
             else:
                 train_data.extend(data_map[key])
@@ -1109,7 +1139,7 @@ class MMRActionData(Dataset):
             'test': test_data
         }
 
-        logging.info(f"LOSO split for subject '{subject_id}': "
+        logging.info(f"LOSO split for subject '{subject_id}' ({len(target_groups)} scenarios): "
                     f"train={len(train_data)}, val={len(val_data)}, test={len(test_data)}")
 
         return loso_splits[partition]
@@ -1198,11 +1228,11 @@ class MMRActionData(Dataset):
         logging.info("STARTING RAW DATA PROCESSING")
         logging.info("=" * 50)
 
-        # Always use subject-based dictionary structure (compatible with all CV modes)
-        logging.info("Using subject-based data structure for consistency")
+        # Use (subject_id, scenario_id) dictionary structure for proper stacking
+        logging.info("Using (subject_id, scenario_id)-based data structure for consistency")
         data_list = {}
 
-        # Load all raw data files and preserve subject information
+        # Load all raw data files and preserve subject and scenario information
         for fn in self.raw_file_names:
             logging.info(f'Loading {fn}')
             with open(fn, 'rb') as f:
@@ -1219,52 +1249,53 @@ class MMRActionData(Dataset):
                 sample['subject_id'] = subject_id
                 sample['scenario_id'] = scenario_id
 
-            # Group by subject
-            if subject_id not in data_list:
-                data_list[subject_id] = []
-            data_list[subject_id].extend(data_slice)
+            # Group by (subject_id, scenario_id) combination
+            group_key = f"{subject_id}_{scenario_id}"
+            if group_key not in data_list:
+                data_list[group_key] = []
+            data_list[group_key].extend(data_slice)
 
-        # Process action labels and filter invalid samples (per subject)
+        # Process action labels and filter invalid samples (per subject-scenario group)
         logging.info("Processing action labels and filtering invalid samples...")
-        logging.info(f"Processing {len(data_list)} subjects")
-        for subject_id in data_list:
-            subject_data = data_list[subject_id]
-            samples_before = len(subject_data)
+        logging.info(f"Processing {len(data_list)} subject-scenario groups")
+        for group_key in data_list:
+            group_data = data_list[group_key]
+            samples_before = len(group_data)
 
             # Map action labels to class indices
             if "carelab" in self.raw_data_path:
                 valid_mappings = 0
-                for data in subject_data:
+                for data in group_data:
                     if data['y'] != -1:
                         data['y'] = self.carelab_label_map[data['y']]
                         valid_mappings += 1
-                logging.info(f"  {subject_id}: Mapped {valid_mappings}/{samples_before} carelab labels")
+                logging.info(f"  {group_key}: Mapped {valid_mappings}/{samples_before} carelab labels")
             else:
                 # For non-carelab datasets, use pre-loaded labels
                 # Note: This assumes action_label indexing aligns with data order
                 mapped_count = 0
-                for i, data in enumerate(subject_data):
+                for i, data in enumerate(group_data):
                     if i < len(self.action_label):
                         data['y'] = self.action_label[i]
                         mapped_count += 1
-                logging.info(f"  {subject_id}: Applied {mapped_count} pre-loaded labels")
+                logging.info(f"  {group_key}: Applied {mapped_count} pre-loaded labels")
 
             # Filter out invalid samples
-            data_list[subject_id] = [d for d in subject_data if d['y']!=-1 and d['x'].shape[0] > 0]
-            samples_after = len(data_list[subject_id])
-            logging.info(f"  {subject_id}: {samples_before} → {samples_after} samples (filtered {samples_before-samples_after} invalid)")
+            data_list[group_key] = [d for d in group_data if d['y']!=-1 and d['x'].shape[0] > 0]
+            samples_after = len(data_list[group_key])
+            logging.info(f"  {group_key}: {samples_before} → {samples_after} samples (filtered {samples_before-samples_after} invalid)")
 
-        # Apply temporal frame stacking and padding (per subject)
-        logging.info("Applying frame stacking and padding...")
-        subject_counts_before = {k: len(v) for k, v in data_list.items()}
+        # Apply temporal frame stacking and padding (per subject-scenario group)
+        logging.info("Applying frame stacking and padding per subject-scenario group...")
+        group_counts_before = {k: len(v) for k, v in data_list.items()}
         data_list = {k: self.stack_and_padd_frames(v) for k, v in data_list.items()}
         num_samples = sum(len(v) for v in data_list.values())
-        logging.info(f"Processed {len(data_list)} subjects:")
-        for subject, count in subject_counts_before.items():
-            logging.info(f"  {subject}: {count} samples")
+        logging.info(f"Processed {len(data_list)} subject-scenario groups:")
+        for group, count in group_counts_before.items():
+            logging.info(f"  {group}: {count} samples")
 
         logging.info(f'✓ Total processed samples: {num_samples}')
-        logging.info(f"Returning subject-based data structure ({len(data_list)} subjects)")
+        logging.info(f"Returning (subject_id, scenario_id)-based data structure ({len(data_list)} groups)")
         logging.info("✓ Data processing completed successfully")
         logging.info("=" * 50)
 
