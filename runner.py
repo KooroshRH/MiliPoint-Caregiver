@@ -24,18 +24,19 @@ def parse_numeric_list(value_str, value_type):
     return [value_type(v) for v in values]
 
 def create_processed_data_path(args_dict):
-    """Create dynamic processed data path based on seed, stacks, max_points, and zero_padding."""
+    """Create dynamic processed data path based on seed, stacks, sampling_rate, max_points, and zero_padding."""
     base_path = args_dict['processed_data_base']
     seed = args_dict['seed']
     stacks = args_dict['stacks']
+    sampling_rate = args_dict['sampling_rate']
     max_points = args_dict['max_points']
     zero_padding = args_dict['zero_padding']
     task = args_dict['processed_data_task']
-    
-    # Create filename: seed_20_stacks_40_padd_point_task_action.pkl
-    filename = f"seed_{seed}_stacks_{stacks}_maxpts_{max_points}_padd_{zero_padding}_task_{task}.pkl"
+
+    # Create filename: seed_20_stacks_40_srate_1_maxpts_22_padd_point_task_action.pkl
+    filename = f"seed_{seed}_stacks_{stacks}_srate_{sampling_rate}_maxpts_{max_points}_padd_{zero_padding}_task_{task}.pkl"
     processed_data_path = os.path.join(base_path, filename)
-    
+
     return processed_data_path
 
 def create_output_paths(args_dict):
@@ -84,6 +85,7 @@ def generate_slurm_script(args_dict, checkpoint_dir, output_file):
     --dataset_val_split {args_dict['val_split']} \\
     --dataset_test_split {args_dict['test_split']} \\
     --dataset_stacks {args_dict['stacks']} \\
+    --dataset_sampling_rate {args_dict['sampling_rate']} \\
     --dataset_zero_padding {args_dict['zero_padding']} \\
     --dataset_max_points {args_dict['max_points']} \\
     --dataset_subject_id {args_dict['subject_id']}"""
@@ -205,6 +207,8 @@ Examples:
                         help='Test split ratio (comma-separated for grid search)')
     parser.add_argument('--stacks', type=str, default='40', action=MultiNumericAction, value_type=int,
                         help='Number of stacks (comma-separated for grid search)')
+    parser.add_argument('--sampling-rate', type=str, default='1', action=MultiNumericAction, value_type=int,
+                        help='Frame sampling rate (comma-separated for grid search, 1=consecutive, 2=every other frame, etc.)')
     parser.add_argument('--zero-padding', type=str, default='per_data_point', action=MultiValueAction,
                         help='Zero padding method (comma-separated for grid search)')
     parser.add_argument('--max-points', type=str, default='22', action=MultiNumericAction, value_type=int,
@@ -294,6 +298,7 @@ Examples:
         'val_split': args.val_split if isinstance(args.val_split, list) else [args.val_split],
         'test_split': args.test_split if isinstance(args.test_split, list) else [args.test_split],
         'stacks': args.stacks if isinstance(args.stacks, list) else [args.stacks],
+        'sampling_rate': args.sampling_rate if isinstance(args.sampling_rate, list) else [args.sampling_rate],
         'zero_padding': args.zero_padding if isinstance(args.zero_padding, list) else [args.zero_padding],
         'max_points': args.max_points if isinstance(args.max_points, list) else [args.max_points],
         'subject_id': args.subject_id if isinstance(args.subject_id, list) else [args.subject_id],
@@ -348,6 +353,7 @@ Examples:
             'val_split': combo[param_names.index('val_split')],
             'test_split': combo[param_names.index('test_split')],
             'stacks': combo[param_names.index('stacks')],
+            'sampling_rate': combo[param_names.index('sampling_rate')],
             'zero_padding': combo[param_names.index('zero_padding')],
             'max_points': combo[param_names.index('max_points')],
             'subject_id': combo[param_names.index('subject_id')],

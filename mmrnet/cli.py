@@ -91,6 +91,9 @@ class Main:
         ('-d_stacks', '--dataset_stacks'): {
             'type': int, 'default': None, 'help': 'Number of mmPoints to stack.',
         },
+        ('-d_sampling_rate', '--dataset_sampling_rate'): {
+            'type': int, 'default': None, 'help': 'Frame sampling rate for stacking (1=consecutive, 2=every other frame, etc.).',
+        },
         ('-d_zero_padding', '--dataset_zero_padding'): {
             'type': str, 'default': None, 'help': 'Zero padding styles.',
         },
@@ -225,6 +228,7 @@ class Main:
             'val_split': a.dataset_val_split,
             'test_split': a.dataset_test_split,
             'stacks': my_stacks,
+            'sampling_rate': a.dataset_sampling_rate,
             'zero_padding': a.dataset_zero_padding,
             'processed_data': a.dataset_processed_data if path is None else path,
             'forced_rewrite': a.dataset_forced_rewrite,

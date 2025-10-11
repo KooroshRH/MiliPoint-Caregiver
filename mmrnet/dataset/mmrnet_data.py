@@ -24,6 +24,7 @@ class MMRKeypointData(Dataset):
     seed = 42
     partitions = (0.8, 0.1, 0.1)
     stacks = None
+    sampling_rate = 1
     zero_padding = 'per_data_point'
     zero_padding_styles = ['per_data_point', 'per_stack', 'data_point', 'stack']
     num_keypoints = 17
@@ -44,6 +45,7 @@ class MMRKeypointData(Dataset):
             c.get('val_split', self.partitions[1]),
             c.get('test_split', self.partitions[2]))
         self.stacks = c.get('stacks', self.stacks)
+        self.sampling_rate = c.get('sampling_rate', self.sampling_rate)
         self.zero_padding = c.get('zero_padding', self.zero_padding)
         self.num_keypoints = c.get('num_keypoints', self.num_keypoints)
         if self.zero_padding not in self.zero_padding_styles:
@@ -368,6 +370,7 @@ class MMRIdentificationData(Dataset):
     seed = 42
     partitions = (0.8, 0.1, 0.1)
     stacks = None
+    sampling_rate = 1
     zero_padding = 'per_data_point'
     zero_padding_styles = ['per_data_point', 'per_stack', 'data_point', 'stack']
     num_keypoints = 17
@@ -675,6 +678,7 @@ class MMRActionData(Dataset):
     seed = 42  # Random seed for reproducibility
     partitions = (0.8, 0.1, 0.1)  # Train/val/test splits
     stacks = None  # Number of frames to stack (None = single frame)
+    sampling_rate = 1  # Frame sampling rate for stacking (1 = consecutive, 2 = every other frame, etc.)
     zero_padding = 'per_data_point'  # Padding strategy
     zero_padding_styles = ['per_data_point', 'per_stack', 'data_point', 'stack']
     num_keypoints = 17  # Number of pose keypoints per frame
@@ -707,7 +711,7 @@ class MMRActionData(Dataset):
 
         # Define mandatory parameters
         mandatory_params = [
-            'seed', 'raw_data_path', 'processed_data', 'max_points', 'stacks',
+            'seed', 'raw_data_path', 'processed_data', 'max_points', 'stacks', 'sampling_rate',
             'cross_validation', 'num_folds', 'fold_number', 'subject_id'
         ]
 
@@ -732,6 +736,7 @@ class MMRActionData(Dataset):
         self.processed_data = c['processed_data']
         self.max_points = c['max_points']
         self.stacks = c['stacks']
+        self.sampling_rate = c['sampling_rate']
 
         # Cross-validation parameters (mandatory)
         self.cross_validation = c['cross_validation']
@@ -745,6 +750,7 @@ class MMRActionData(Dataset):
         logging.info(f"  - Cross-validation: {self.cross_validation}")
         logging.info(f"  - Max points per frame: {self.max_points}")
         logging.info(f"  - Frame stacking: {self.stacks}")
+        logging.info(f"  - Sampling rate: {self.sampling_rate}")
         logging.info(f"  - Random seed: {self.seed}")
 
         # Validate cross-validation configuration
@@ -946,6 +952,7 @@ class MMRActionData(Dataset):
             'num_classes': num_classes,
             'max_points': self.max_points,
             'stacks': self.stacks,
+            'sampling_rate': self.sampling_rate,
             'partition': partition,
         }
 
@@ -958,6 +965,7 @@ class MMRActionData(Dataset):
         logging.info(f"  - Keypoints per frame: {self.num_keypoints}")
         logging.info(f"  - Max points per frame: {self.max_points}")
         logging.info(f"  - Frame stacking: {self.stacks if self.stacks else 'disabled'}")
+        logging.info(f"  - Sampling rate: {self.sampling_rate}")
         logging.info(f"  - Cross-validation: {self.cross_validation if self.cross_validation else 'standard split'}")
         logging.info("=" * 60)
 
@@ -1370,7 +1378,7 @@ class MMRActionData(Dataset):
             return data_list
 
         logging.info(f"Starting frame stacking and padding process...")
-        logging.info(f"Configuration: stacks={self.stacks}, max_points={self.max_points}, padding={self.zero_padding}")
+        logging.info(f"Configuration: stacks={self.stacks}, sampling_rate={self.sampling_rate}, max_points={self.max_points}, padding={self.zero_padding}")
 
         # take multiple frames for each x
         xs = [d['x'] for d in data_list]
@@ -1391,8 +1399,9 @@ class MMRActionData(Dataset):
             for i in range(len(xs)):
                 data_point = []
                 for j in range(self.stacks):
-                    if i - j >= 0 and ys[i] == ys[i-j]:
-                        mydata_slice = xs[i - j]
+                    frame_idx = i - j * self.sampling_rate
+                    if frame_idx >= 0 and ys[i] == ys[frame_idx]:
+                        mydata_slice = xs[frame_idx]
                         diff = self.max_points - mydata_slice.shape[0]
                         mydata_slice = np.pad(mydata_slice, ((0, max(diff, 0)), (0, 0)), 'constant')
                         mydata_slice = mydata_slice[np.random.choice(len(mydata_slice), self.max_points, replace=False)]
@@ -1414,14 +1423,20 @@ class MMRActionData(Dataset):
             logging.info("Using per-stack padding strategy with centroid normalization")
             total_frames_stacked = 0
 
-            # First phase: stack frames
+            # First phase: stack frames with sampling rate
             for i in range(len(xs)):
-                start = max(0, i - self.stacks)
-                while start < i and ys[i] != ys[start]:
-                    start = start + 1
-                frames_in_stack = i - start + 1
+                frames_to_stack = []
+                frames_to_stack.append(xs[i])  # Always include current frame
+
+                for j in range(1, self.stacks):
+                    frame_idx = i - j * self.sampling_rate
+                    if frame_idx >= 0 and ys[i] == ys[frame_idx]:
+                        frames_to_stack.insert(0, xs[frame_idx])  # Insert at beginning to maintain temporal order
+                    # If frame not available, we don't add anything (will be handled in padding)
+
+                frames_in_stack = len(frames_to_stack)
                 total_frames_stacked += frames_in_stack
-                stacked_xs.append(np.concatenate(xs[start:i+1], axis=0))
+                stacked_xs.append(np.concatenate(frames_to_stack, axis=0))
                 pbar.update(0.33)
 
             logging.info(f"Stacking phase completed: {total_frames_stacked} total frames in {len(stacked_xs)} stacks")
@@ -1437,7 +1452,6 @@ class MMRActionData(Dataset):
 
             # Third phase: apply padding
             for x in normalized_stacks:
-                original_length = x.shape[0]
                 diff = self.max_points * self.stacks - x.shape[0]
                 x = np.pad(x, ((0, max(diff, 0)), (0, 0)), 'constant')
                 x = x[np.random.choice(len(x), self.max_points * self.stacks, replace=False)]
