@@ -8,6 +8,7 @@ from .attdgcnn import AttDGCNN
 from .hybrid_pointnet import HybridPointNet
 from .ensemble_model import EnsembleModel, load_ensemble_from_checkpoint
 from .pointnet_film import PointNetWithFiLM
+from .pointnet_film_density import PointNetWithFiLMDensity
 
 model_map = {
     'dgcnn': DGCNN,
@@ -18,5 +19,6 @@ model_map = {
     'attdgcnn': AttDGCNN,
     'hybrid': HybridPointNet,
     'ensemble': EnsembleModel,
-    'pointnet-film': PointNetWithFiLM
+    'pointnet-film': PointNetWithFiLM,
+    'pointnet-film-density': PointNetWithFiLMDensity
 }
