@@ -36,6 +36,51 @@ def assign_zone_to_point(x, y):
             return zone["zone_id"]
     return 0  # Unknown zone
 
+def calculate_local_density(point_idx, all_points, radius=0.2, max_density=5.0):
+    """
+    Calculate local density for a point based on nearby points within a radius.
+    Uses logarithmic scaling for better differentiation between high-density areas.
+
+    Args:
+        point_idx: Index of the point to calculate density for
+        all_points: Array of all transformed points [[x, y, z, zone_id], ...]
+        radius: Radius within which to count nearby points (default: 0.2m)
+        max_density: Maximum density value for normalization (default: 5.0)
+
+    Returns:
+        float: Local density value with logarithmic scaling for better differentiation
+    """
+    if len(all_points) <= 1:
+        return 0.0
+
+    target_point = np.array(all_points[point_idx][:3])  # x, y, z coordinates
+    nearby_count = 0
+
+    # Count points within radius (excluding the point itself)
+    for i, other_point in enumerate(all_points):
+        if i == point_idx:
+            continue
+
+        other_coords = np.array(other_point[:3])
+        distance = np.linalg.norm(target_point - other_coords)
+
+        if distance <= radius:
+            nearby_count += 1
+
+    # Use logarithmic scaling for better differentiation
+    # This compresses high density values while preserving differences at lower densities
+    if nearby_count == 0:
+        return 0.0
+    elif nearby_count <= 5:
+        # Linear scaling for low densities (0-5 neighbors -> 0-2.5 density)
+        return (nearby_count / 5.0) * (max_density / 2.0)
+    else:
+        # Logarithmic scaling for higher densities
+        log_density = np.log(nearby_count + 1)  # +1 to avoid log(0)
+        max_log = np.log(51)  # Assume max ~50 neighbors for scaling
+        scaled_density = (log_density / max_log) * max_density
+        return min(scaled_density, max_density)
+
 def process_point_with_zone(point):
     """
     Transform a single point and assign its zone based on its individual position.
@@ -45,6 +90,7 @@ def process_point_with_zone(point):
 
     Returns:
         [x, y, z, zone_id] coordinates (after transformation and individual zone assignment)
+        Note: Density will be calculated separately for all points in the frame
     """
     # Transform radar position for this individual point
     azimuth_rad = np.deg2rad(RADAR_AZIMUTH)
@@ -70,10 +116,10 @@ def calculate_frame_statistics(points):
     Calculate various statistics for a point cloud frame.
 
     Args:
-        points: List of [x, y, z, zone_id] coordinates
+        points: List of [x, y, z, zone_id, local_density] coordinates
 
     Returns:
-        dict: Statistics including count, density, distances, etc.
+        dict: Statistics including count, density, distances, local_density stats, etc.
     """
     if len(points) == 0:
         return {
@@ -84,12 +130,17 @@ def calculate_frame_statistics(points):
             'max_distance': 0.0,
             'std_distance': 0.0,
             'bounding_box_volume': 0.0,
-            'unique_zones': 0
+            'unique_zones': 0,
+            'avg_local_density': 0.0,
+            'min_local_density': 0.0,
+            'max_local_density': 0.0,
+            'std_local_density': 0.0
         }
 
     points_array = np.array(points)
     xyz_coords = points_array[:, :3]  # Extract x, y, z coordinates
     zone_ids = points_array[:, 3]     # Extract zone IDs
+    local_densities = points_array[:, 4] if points_array.shape[1] > 4 else np.zeros(len(points))  # Extract local densities
 
     num_points = len(points)
 
@@ -119,6 +170,15 @@ def calculate_frame_statistics(points):
     # Count unique zones
     unique_zones = len(np.unique(zone_ids))
 
+    # Calculate local density statistics
+    if len(local_densities) > 0:
+        avg_local_density = np.mean(local_densities)
+        min_local_density = np.min(local_densities)
+        max_local_density = np.max(local_densities)
+        std_local_density = np.std(local_densities)
+    else:
+        avg_local_density = min_local_density = max_local_density = std_local_density = 0.0
+
     return {
         'num_points': num_points,
         'density': density,
@@ -127,7 +187,11 @@ def calculate_frame_statistics(points):
         'max_distance': max_distance,
         'std_distance': std_distance,
         'bounding_box_volume': bounding_box_volume,
-        'unique_zones': unique_zones
+        'unique_zones': unique_zones,
+        'avg_local_density': avg_local_density,
+        'min_local_density': min_local_density,
+        'max_local_density': max_local_density,
+        'std_local_density': std_local_density
     }
 
 def update_global_statistics(global_stats, frame_stats, label):
@@ -143,7 +207,11 @@ def update_global_statistics(global_stats, frame_stats, label):
             'max_distance': [],
             'std_distance': [],
             'bounding_box_volume': [],
-            'unique_zones': []
+            'unique_zones': [],
+            'avg_local_density': [],
+            'min_local_density': [],
+            'max_local_density': [],
+            'std_local_density': []
         }
 
     # Update overall statistics
@@ -162,7 +230,11 @@ def update_global_statistics(global_stats, frame_stats, label):
             'max_distance': [],
             'std_distance': [],
             'bounding_box_volume': [],
-            'unique_zones': []
+            'unique_zones': [],
+            'avg_local_density': [],
+            'min_local_density': [],
+            'max_local_density': [],
+            'std_local_density': []
         }
 
     global_stats['by_label'][label]['count'] += 1
@@ -200,7 +272,12 @@ def print_statistics_summary(global_stats):
     print(f"\n📈 STATISTICS BY ACTION LABEL")
     print("-" * 60)
 
-    for label, label_stats in sorted(global_stats['by_label'].items()):
+    # Sort labels properly - separate numbers and strings
+    label_items = list(global_stats['by_label'].items())
+    # Sort by converting labels to strings for consistent comparison
+    sorted_labels = sorted(label_items, key=lambda x: str(x[0]))
+
+    for label, label_stats in sorted_labels:
         if label == -1:
             continue  # Skip invalid labels
 
@@ -260,13 +337,20 @@ def extract_point_clouds_from_json(json_file_path, labels_npy_path):
                 processed_point = process_point_with_zone(point)
                 frame_point_clouds_with_zones.append(processed_point)
 
-            # Calculate statistics for this frame
-            frame_stats = calculate_frame_statistics(frame_point_clouds_with_zones)
+            # Calculate local density for each point and add as 5th column
+            frame_point_clouds_with_density = []
+            for i, point in enumerate(frame_point_clouds_with_zones):
+                local_density = calculate_local_density(i, frame_point_clouds_with_zones)
+                point_with_density = point + [local_density]  # [x, y, z, zone_id, local_density]
+                frame_point_clouds_with_density.append(point_with_density)
+
+            # Calculate statistics for this frame (using points with density)
+            frame_stats = calculate_frame_statistics(frame_point_clouds_with_density)
             update_global_statistics(global_stats, frame_stats, label)
 
             # For frame-level zone info (optional), use the most common zone
-            if frame_point_clouds_with_zones:
-                zones_in_frame = [point[3] for point in frame_point_clouds_with_zones]
+            if frame_point_clouds_with_density:
+                zones_in_frame = [point[3] for point in frame_point_clouds_with_density]
                 zone_counts = {}
                 for z in zones_in_frame:
                     zone_counts[z] = zone_counts.get(z, 0) + 1
@@ -274,7 +358,7 @@ def extract_point_clouds_from_json(json_file_path, labels_npy_path):
             else:
                 frame_zone = 0
 
-            output.append({"x": np.asarray(frame_point_clouds_with_zones), "y": label, "timestamp": timestamp_ms, "zone": frame_zone})
+            output.append({"x": np.asarray(frame_point_clouds_with_density), "y": label, "timestamp": timestamp_ms, "zone": frame_zone})
 
     return output, global_stats
 
@@ -323,7 +407,11 @@ def merge_statistics(combined_stats, scenario_stats):
             'max_distance': [],
             'std_distance': [],
             'bounding_box_volume': [],
-            'unique_zones': []
+            'unique_zones': [],
+            'avg_local_density': [],
+            'min_local_density': [],
+            'max_local_density': [],
+            'std_local_density': []
         }
 
     # Merge overall statistics
@@ -343,7 +431,11 @@ def merge_statistics(combined_stats, scenario_stats):
                 'max_distance': [],
                 'std_distance': [],
                 'bounding_box_volume': [],
-                'unique_zones': []
+                'unique_zones': [],
+                'avg_local_density': [],
+                'min_local_density': [],
+                'max_local_density': [],
+                'std_local_density': []
             }
 
         combined_stats['by_label'][label]['count'] += label_stats['count']
