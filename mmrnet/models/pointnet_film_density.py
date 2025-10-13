@@ -54,11 +54,11 @@ class PointNetWithFiLMDensity(torch.nn.Module):
         self.num_classes = info['num_classes']
         self.zone_dim = zone_dim
 
-        # Updated MLP layers to handle 4D input (x,y,z,density) instead of 3D
-        # Input channels account for both `pos` and node features, now 4D instead of 3D
-        self.sa1_module = SAModule(0.5, 0.2, MLP([4 * 2, 64, 64, 128]))  # 4*2=8 instead of 3*2=6
-        self.sa2_module = SAModule(0.25, 0.4, MLP([128 + 4, 128, 128, 256]))  # 128+4 instead of 128+3
-        self.sa3_module = GlobalSAModule(MLP([256 + 4, 256, 512, 1024]))  # 256+4 instead of 256+3
+        # Updated MLP layers to handle 4D node features + 3D position features = 7D input
+        # PointNetConv concatenates node features (4D) with position features (3D)
+        self.sa1_module = SAModule(0.5, 0.2, MLP([4 + 3, 64, 64, 128]))  # 4+3=7 instead of 3+3=6
+        self.sa2_module = SAModule(0.25, 0.4, MLP([128 + 3, 128, 128, 256]))  # pos is always 3D
+        self.sa3_module = GlobalSAModule(MLP([256 + 3, 256, 512, 1024]))  # pos is always 3D
 
         # FiLM module for zone conditioning
         self.zone_film = ZoneFiLM(feat_dim=128, zone_dim=zone_dim)
