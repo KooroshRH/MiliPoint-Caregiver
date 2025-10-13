@@ -1399,6 +1399,35 @@ class MMRActionData(Dataset):
 
         return data_list, num_samples
 
+    def _select_points_by_density(self, points, max_points):
+        """
+        Select points based on highest density values.
+
+        Args:
+            points: numpy array of shape (N, 4) or (N, 5) where columns are [x, y, z, zone] or [x, y, z, zone, density]
+            max_points: number of points to select
+
+        Returns:
+            Selected points with same shape but potentially fewer rows
+        """
+        if len(points) <= max_points:
+            return points
+
+        if points.shape[1] >= 5:
+            # Has density column (5th column), use it for selection
+            density_values = points[:, 4]  # Extract density values
+
+            # Sort points by density (highest first) and select top max_points
+            density_indices = np.argsort(density_values)[::-1]  # Descending order
+            selected_indices = density_indices[:max_points]
+
+            return points[selected_indices]
+        else:
+            # No density column, fall back to random selection
+            logging.warning("No density values found, falling back to random point selection")
+            selected_indices = np.random.choice(len(points), max_points, replace=False)
+            return points[selected_indices]
+
     def _normalize_stack_by_centroid(self, stack):
         """
         Normalize a stack of frames by translating to centroid's nearest point.
@@ -1512,7 +1541,7 @@ class MMRActionData(Dataset):
                         mydata_slice = xs[frame_idx]
                         diff = self.max_points - mydata_slice.shape[0]
                         mydata_slice = np.pad(mydata_slice, ((0, max(diff, 0)), (0, 0)), 'constant')
-                        mydata_slice = mydata_slice[np.random.choice(len(mydata_slice), self.max_points, replace=False)]
+                        mydata_slice = self._select_points_by_density(mydata_slice, self.max_points)
                         data_point.append(mydata_slice)
                         total_frames_processed += 1
                     else:
@@ -1526,9 +1555,9 @@ class MMRActionData(Dataset):
                 pbar.update(1)
 
             logging.info(f"Per-data-point stacking completed: {total_frames_processed} real frames, {zero_frames_added} zero-padded frames")
-            logging.info(f"Applied centroid-based normalization to {len(padded_xs)} stacks")
+            logging.info(f"Applied centroid-based normalization and density-based point selection to {len(padded_xs)} stacks")
         elif self.zero_padding in ['per_stack', 'stack']:
-            logging.info("Using per-stack padding strategy with centroid normalization")
+            logging.info("Using per-stack padding strategy with centroid normalization and density-based selection")
             total_frames_stacked = 0
 
             # First phase: stack frames with sampling rate
@@ -1562,11 +1591,11 @@ class MMRActionData(Dataset):
             for x in normalized_stacks:
                 diff = self.max_points * self.stacks - x.shape[0]
                 x = np.pad(x, ((0, max(diff, 0)), (0, 0)), 'constant')
-                x = x[np.random.choice(len(x), self.max_points * self.stacks, replace=False)]
+                x = self._select_points_by_density(x, self.max_points * self.stacks)
                 padded_xs.append(x)
                 pbar.update(0.34)
 
-            logging.info(f"Padding phase completed: sequences padded/sampled to {self.max_points * self.stacks} points each")
+            logging.info(f"Padding phase completed: sequences padded/selected to {self.max_points * self.stacks} points each using density-based selection")
 
         else:
             logging.error(f"Unknown zero_padding strategy: {self.zero_padding}")
