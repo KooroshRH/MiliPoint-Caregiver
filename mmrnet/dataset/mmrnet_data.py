@@ -1311,7 +1311,7 @@ class MMRActionData(Dataset):
                 x_data = sample['x']
                 label = sample['y']
 
-                if x_data.shape[0] > 0 and x_data.shape[1] >= 4:  # Ensure we have zone data
+                if x_data.shape[0] > 0 and x_data.shape[1] >= 4:  # Ensure we have zone data (and possibly density)
                     # Get zone from first point (all points in a frame should have same zone)
                     zone = int(x_data[0, 3])
 
@@ -1408,9 +1408,10 @@ class MMRActionData(Dataset):
         2. Find the point closest to the centroid
         3. Translate all points to make this point the origin
         4. Keep zone values unchanged
+        5. If present, normalize density values by translating them relative to reference point's density
 
         Args:
-            stack: numpy array of shape (N, 4) where columns are [x, y, z, zone]
+            stack: numpy array of shape (N, 4) or (N, 5) where columns are [x, y, z, zone] or [x, y, z, zone, density]
 
         Returns:
             Normalized stack with same shape
@@ -1418,9 +1419,19 @@ class MMRActionData(Dataset):
         if len(stack) == 0 or stack.shape[1] < 4:
             return stack
 
-        # Extract spatial coordinates (x, y, z) and zone
-        xyz = stack[:, :3]  # shape (N, 3)
-        zones = stack[:, 3:4]  # shape (N, 1)
+        # Extract coordinates and features
+        if stack.shape[1] == 4:
+            # Format: [x, y, z, zone]
+            xyz = stack[:, :3]  # shape (N, 3)
+            zones = stack[:, 3:4]  # shape (N, 1)
+            density = None
+        elif stack.shape[1] == 5:
+            # Format: [x, y, z, zone, density]
+            xyz = stack[:, :3]  # shape (N, 3)
+            zones = stack[:, 3:4]  # shape (N, 1)
+            density = stack[:, 4:5]  # shape (N, 1)
+        else:
+            return stack  # Unknown format, return unchanged
 
         # Filter out zero-padded points (all zeros) when computing centroid
         non_zero_mask = np.any(xyz != 0, axis=1)
@@ -1440,11 +1451,18 @@ class MMRActionData(Dataset):
         closest_idx = non_zero_indices[closest_idx_in_nonzero]
         reference_point = xyz[closest_idx]  # shape (3,)
 
-        # Translate all spatial coordinates to make reference point the origin
+        # Translate spatial coordinates to make reference point the origin
         normalized_xyz = xyz - reference_point
 
-        # Combine normalized spatial coords with unchanged zones
-        normalized_stack = np.concatenate([normalized_xyz, zones], axis=1)
+        # Normalize density values if present (translate by reference point's density)
+        if density is not None:
+            reference_density = density[closest_idx]  # Get density of reference point
+            normalized_density = density - reference_density
+            # Combine normalized spatial coords, unchanged zones, and normalized density
+            normalized_stack = np.concatenate([normalized_xyz, zones, normalized_density], axis=1)
+        else:
+            # Combine normalized spatial coords with unchanged zones only
+            normalized_stack = np.concatenate([normalized_xyz, zones], axis=1)
 
         return normalized_stack
 
