@@ -1498,7 +1498,7 @@ class MMRActionData(Dataset):
                         data_point.append(mydata_slice)
                         total_frames_processed += 1
                     else:
-                        data_point.append(np.zeros((self.max_points, 4)))
+                        data_point.append(np.zeros((self.max_points, 5)))
                         zero_frames_added += 1
 
                 # Concatenate frames and normalize the entire stack
