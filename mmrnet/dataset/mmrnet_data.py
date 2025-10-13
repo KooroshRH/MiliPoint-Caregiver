@@ -1293,6 +1293,96 @@ class MMRActionData(Dataset):
             samples_after = len(data_list[group_key])
             logging.info(f"  {group_key}: {samples_before} → {samples_after} samples (filtered {samples_before-samples_after} invalid)")
 
+        # Analyze zone distribution and zone-to-label relationship
+        logging.info("ANALYZING ZONE DISTRIBUTION AND ZONE-LABEL RELATIONSHIPS")
+        logging.info("-" * 60)
+
+        # Collect all valid samples for analysis
+        all_samples = []
+        for group_data in data_list.values():
+            all_samples.extend(group_data)
+
+        if all_samples:
+            zone_counts = {}
+            zone_label_counts = {}
+            label_zone_counts = {}
+
+            for sample in all_samples:
+                x_data = sample['x']
+                label = sample['y']
+
+                if x_data.shape[0] > 0 and x_data.shape[1] >= 4:  # Ensure we have zone data
+                    # Get zone from first point (all points in a frame should have same zone)
+                    zone = int(x_data[0, 3])
+
+                    # Count zones
+                    if zone not in zone_counts:
+                        zone_counts[zone] = 0
+                    zone_counts[zone] += 1
+
+                    # Count zone-label combinations
+                    if zone not in zone_label_counts:
+                        zone_label_counts[zone] = {}
+                    if label not in zone_label_counts[zone]:
+                        zone_label_counts[zone][label] = 0
+                    zone_label_counts[zone][label] += 1
+
+                    # Count label-zone combinations (reverse mapping)
+                    if label not in label_zone_counts:
+                        label_zone_counts[label] = {}
+                    if zone not in label_zone_counts[label]:
+                        label_zone_counts[label][zone] = 0
+                    label_zone_counts[label][zone] += 1
+
+            # Log zone distribution
+            total_samples_analyzed = len(all_samples)
+            logging.info(f"Zone Distribution Analysis ({total_samples_analyzed} total samples):")
+            logging.info("Zone ID | Count | Percentage")
+            logging.info("-" * 30)
+            for zone in sorted(zone_counts.keys()):
+                count = zone_counts[zone]
+                percentage = (count / total_samples_analyzed) * 100
+                logging.info(f"Zone {zone:2d} | {count:5d} | {percentage:6.2f}%")
+
+            # Log zone-to-label relationship
+            logging.info("\nZone-to-Label Distribution:")
+            logging.info("-" * 40)
+            for zone in sorted(zone_label_counts.keys()):
+                logging.info(f"Zone {zone}:")
+                zone_total = zone_counts[zone]
+                for label in sorted(zone_label_counts[zone].keys()):
+                    count = zone_label_counts[zone][label]
+                    percentage = (count / zone_total) * 100
+                    # Map label back to action name if possible
+                    action_name = "unknown"
+                    for name, idx in self.carelab_label_map.items():
+                        if idx == label:
+                            action_name = name
+                            break
+                    logging.info(f"  → Label {label:2d} ({action_name}): {count:4d} samples ({percentage:5.2f}%)")
+
+            # Log label-to-zone relationship (which zones each action occurs in)
+            logging.info("\nLabel-to-Zone Distribution:")
+            logging.info("-" * 40)
+            for label in sorted(label_zone_counts.keys()):
+                # Map label back to action name
+                action_name = "unknown"
+                for name, idx in self.carelab_label_map.items():
+                    if idx == label:
+                        action_name = name
+                        break
+
+                label_total = sum(label_zone_counts[label].values())
+                logging.info(f"Label {label:2d} ({action_name}): {label_total} total samples")
+                for zone in sorted(label_zone_counts[label].keys()):
+                    count = label_zone_counts[label][zone]
+                    percentage = (count / label_total) * 100
+                    logging.info(f"  → Zone {zone:2d}: {count:4d} samples ({percentage:5.2f}%)")
+
+            logging.info("-" * 60)
+        else:
+            logging.warning("No valid samples found for zone analysis")
+
         # Apply temporal frame stacking and padding (per subject-scenario group)
         logging.info("Applying frame stacking and padding per subject-scenario group...")
         group_counts_before = {k: len(v) for k, v in data_list.items()}
