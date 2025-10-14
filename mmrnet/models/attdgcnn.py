@@ -2,7 +2,6 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch_geometric.nn import MLP, DynamicEdgeConv, global_max_pool, global_mean_pool
-from torch_scatter import scatter_max, scatter_mean
 
 class SELayer(nn.Module):
     """Squeeze-and-Excitation layer for channel attention"""

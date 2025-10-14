@@ -2,7 +2,6 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch_geometric.nn import MLP, DynamicEdgeConv, global_max_pool, global_mean_pool
-from torch_scatter import scatter_max
 
 class STNkd(nn.Module):
     """Spatial Transformer Network for k-dimensional inputs"""

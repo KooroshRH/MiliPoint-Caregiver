@@ -163,7 +163,7 @@ class AuxFormer(nn.Module):
     """
     def __init__(self,
                  info,
-                 dim_model=[32, 64, 128, 256],
+                 dim_model=[32, 64, 128, 256, 512],
                  k=16,
                  aux_dim=4,
                  apply_cross_attn=True,
