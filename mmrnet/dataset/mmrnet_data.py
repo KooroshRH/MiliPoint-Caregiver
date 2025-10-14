@@ -1541,7 +1541,7 @@ class MMRActionData(Dataset):
                         mydata_slice = xs[frame_idx]
                         diff = self.max_points - mydata_slice.shape[0]
                         mydata_slice = np.pad(mydata_slice, ((0, max(diff, 0)), (0, 0)), 'constant')
-                        mydata_slice = self._select_points_by_density(mydata_slice, self.max_points)
+                        mydata_slice = mydata_slice[np.random.choice(len(mydata_slice), self.max_points, replace=False)]
                         data_point.append(mydata_slice)
                         total_frames_processed += 1
                     else:
@@ -1591,7 +1591,7 @@ class MMRActionData(Dataset):
             for x in normalized_stacks:
                 diff = self.max_points * self.stacks - x.shape[0]
                 x = np.pad(x, ((0, max(diff, 0)), (0, 0)), 'constant')
-                x = self._select_points_by_density(x, self.max_points * self.stacks)
+                x = x[np.random.choice(len(x), self.max_points * self.stacks, replace=False)]
                 padded_xs.append(x)
                 pbar.update(0.34)
 
