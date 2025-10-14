@@ -249,7 +249,7 @@ Examples:
                         help='GPU resources')
     parser.add_argument('--nodes', type=int, default=1,
                         help='Number of nodes')
-    parser.add_argument('--mem', type=str, default='32G',
+    parser.add_argument('--mem', type=str, default='64G',
                         help='Memory allocation')
     parser.add_argument('--cpus', type=int, default=4,
                         help='Number of CPUs')
