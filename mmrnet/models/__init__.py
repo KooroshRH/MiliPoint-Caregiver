@@ -22,5 +22,5 @@ model_map = {
     'ensemble': EnsembleModel,
     'pointnet-film': PointNetWithFiLM,
     'pointnet-film-density': PointNetWithFiLMDensity,
-    'auxformer': AuxFormer
+    'aux_former': AuxFormer
 }
