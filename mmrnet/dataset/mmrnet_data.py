@@ -1404,7 +1404,8 @@ class MMRActionData(Dataset):
         Select points based on highest density values.
 
         Args:
-            points: numpy array of shape (N, 4) or (N, 5) where columns are [x, y, z, zone] or [x, y, z, zone, density]
+            points: numpy array with columns [x, y, z, zone], [x, y, z, zone, density],
+                    or [x, y, z, zone, doppler, snr, density]
             max_points: number of points to select
 
         Returns:
@@ -1413,9 +1414,18 @@ class MMRActionData(Dataset):
         if len(points) <= max_points:
             return points
 
-        if points.shape[1] >= 5:
-            # Has density column (5th column), use it for selection
-            density_values = points[:, 4]  # Extract density values
+        # Determine density column index based on number of columns
+        density_col_idx = None
+        if points.shape[1] == 5:
+            # Format: [x, y, z, zone, density]
+            density_col_idx = 4
+        elif points.shape[1] == 7:
+            # Format: [x, y, z, zone, doppler, snr, density]
+            density_col_idx = 6
+
+        if density_col_idx is not None:
+            # Has density column, use it for selection
+            density_values = points[:, density_col_idx]  # Extract density values
 
             # Sort points by density (highest first) and select top max_points
             density_indices = np.argsort(density_values)[::-1]  # Descending order
@@ -1436,11 +1446,12 @@ class MMRActionData(Dataset):
         1. Compute the centroid of all points (x, y, z)
         2. Find the point closest to the centroid
         3. Translate all points to make this point the origin
-        4. Keep zone values unchanged
+        4. Keep zone, doppler, and SNR values unchanged
         5. If present, normalize density values by translating them relative to reference point's density
 
         Args:
-            stack: numpy array of shape (N, 4) or (N, 5) where columns are [x, y, z, zone] or [x, y, z, zone, density]
+            stack: numpy array with columns [x, y, z, zone] or [x, y, z, zone, density]
+                   or [x, y, z, zone, doppler, snr, density]
 
         Returns:
             Normalized stack with same shape
@@ -1448,17 +1459,28 @@ class MMRActionData(Dataset):
         if len(stack) == 0 or stack.shape[1] < 4:
             return stack
 
-        # Extract coordinates and features
+        # Extract coordinates and features based on number of columns
         if stack.shape[1] == 4:
             # Format: [x, y, z, zone]
             xyz = stack[:, :3]  # shape (N, 3)
             zones = stack[:, 3:4]  # shape (N, 1)
+            doppler = None
+            snr = None
             density = None
         elif stack.shape[1] == 5:
             # Format: [x, y, z, zone, density]
             xyz = stack[:, :3]  # shape (N, 3)
             zones = stack[:, 3:4]  # shape (N, 1)
+            doppler = None
+            snr = None
             density = stack[:, 4:5]  # shape (N, 1)
+        elif stack.shape[1] == 7:
+            # Format: [x, y, z, zone, doppler, snr, density]
+            xyz = stack[:, :3]  # shape (N, 3)
+            zones = stack[:, 3:4]  # shape (N, 1)
+            doppler = stack[:, 4:5]  # shape (N, 1)
+            snr = stack[:, 5:6]  # shape (N, 1)
+            density = stack[:, 6:7]  # shape (N, 1)
         else:
             return stack  # Unknown format, return unchanged
 
@@ -1483,13 +1505,22 @@ class MMRActionData(Dataset):
         # Translate spatial coordinates to make reference point the origin
         normalized_xyz = xyz - reference_point
 
+        # Build the normalized stack based on which features are present
         # Normalize density values if present (translate by reference point's density)
-        if density is not None:
+        if doppler is not None and snr is not None and density is not None:
+            # Format: [x, y, z, zone, doppler, snr, density]
+            reference_density = density[closest_idx]  # Get density of reference point
+            normalized_density = density - reference_density
+            # Combine: normalized xyz, unchanged zones, unchanged doppler/snr, normalized density
+            normalized_stack = np.concatenate([normalized_xyz, zones, doppler, snr, normalized_density], axis=1)
+        elif density is not None:
+            # Format: [x, y, z, zone, density]
             reference_density = density[closest_idx]  # Get density of reference point
             normalized_density = density - reference_density
             # Combine normalized spatial coords, unchanged zones, and normalized density
             normalized_stack = np.concatenate([normalized_xyz, zones, normalized_density], axis=1)
         else:
+            # Format: [x, y, z, zone]
             # Combine normalized spatial coords with unchanged zones only
             normalized_stack = np.concatenate([normalized_xyz, zones], axis=1)
 
@@ -1545,7 +1576,7 @@ class MMRActionData(Dataset):
                         data_point.append(mydata_slice)
                         total_frames_processed += 1
                     else:
-                        data_point.append(np.zeros((self.max_points, 5)))
+                        data_point.append(np.zeros((self.max_points, 7)))
                         zero_frames_added += 1
 
                 # Concatenate frames and normalize the entire stack
