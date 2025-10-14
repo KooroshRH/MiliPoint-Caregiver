@@ -86,10 +86,10 @@ def process_point_with_zone(point):
     Transform a single point and assign its zone based on its individual position.
 
     Args:
-        point: [x, y, z] coordinates (before transformation)
+        point: [x, y, z, doppler, snr] coordinates (before transformation)
 
     Returns:
-        [x, y, z, zone_id] coordinates (after transformation and individual zone assignment)
+        [x, y, z, zone_id, doppler, snr] coordinates (after transformation and individual zone assignment)
         Note: Density will be calculated separately for all points in the frame
     """
     # Transform radar position for this individual point
@@ -107,16 +107,18 @@ def process_point_with_zone(point):
     # Assign zone based on this point's individual transformed position
     transformed_x, transformed_y = global_xy
     original_z = point[2]
+    doppler = point[3]
+    snr = point[4]
     zone_id = assign_zone_to_point(transformed_x, transformed_y)
 
-    return [transformed_x, transformed_y, original_z, zone_id]
+    return [transformed_x, transformed_y, original_z, zone_id, doppler, snr]
 
 def calculate_frame_statistics(points):
     """
     Calculate various statistics for a point cloud frame.
 
     Args:
-        points: List of [x, y, z, zone_id, local_density] coordinates
+        points: List of [x, y, z, zone_id, doppler, snr, local_density] coordinates
 
     Returns:
         dict: Statistics including count, density, distances, local_density stats, etc.
@@ -134,13 +136,23 @@ def calculate_frame_statistics(points):
             'avg_local_density': 0.0,
             'min_local_density': 0.0,
             'max_local_density': 0.0,
-            'std_local_density': 0.0
+            'std_local_density': 0.0,
+            'avg_snr': 0.0,
+            'min_snr': 0.0,
+            'max_snr': 0.0,
+            'std_snr': 0.0,
+            'avg_doppler': 0.0,
+            'min_doppler': 0.0,
+            'max_doppler': 0.0,
+            'std_doppler': 0.0
         }
 
     points_array = np.array(points)
     xyz_coords = points_array[:, :3]  # Extract x, y, z coordinates
     zone_ids = points_array[:, 3]     # Extract zone IDs
-    local_densities = points_array[:, 4] if points_array.shape[1] > 4 else np.zeros(len(points))  # Extract local densities
+    doppler_values = points_array[:, 4] if points_array.shape[1] > 4 else np.zeros(len(points))  # Extract doppler
+    snr_values = points_array[:, 5] if points_array.shape[1] > 5 else np.zeros(len(points))  # Extract SNR
+    local_densities = points_array[:, 6] if points_array.shape[1] > 6 else np.zeros(len(points))  # Extract local densities
 
     num_points = len(points)
 
@@ -179,6 +191,24 @@ def calculate_frame_statistics(points):
     else:
         avg_local_density = min_local_density = max_local_density = std_local_density = 0.0
 
+    # Calculate SNR statistics
+    if len(snr_values) > 0:
+        avg_snr = np.mean(snr_values)
+        min_snr = np.min(snr_values)
+        max_snr = np.max(snr_values)
+        std_snr = np.std(snr_values)
+    else:
+        avg_snr = min_snr = max_snr = std_snr = 0.0
+
+    # Calculate Doppler statistics
+    if len(doppler_values) > 0:
+        avg_doppler = np.mean(doppler_values)
+        min_doppler = np.min(doppler_values)
+        max_doppler = np.max(doppler_values)
+        std_doppler = np.std(doppler_values)
+    else:
+        avg_doppler = min_doppler = max_doppler = std_doppler = 0.0
+
     return {
         'num_points': num_points,
         'density': density,
@@ -191,7 +221,15 @@ def calculate_frame_statistics(points):
         'avg_local_density': avg_local_density,
         'min_local_density': min_local_density,
         'max_local_density': max_local_density,
-        'std_local_density': std_local_density
+        'std_local_density': std_local_density,
+        'avg_snr': avg_snr,
+        'min_snr': min_snr,
+        'max_snr': max_snr,
+        'std_snr': std_snr,
+        'avg_doppler': avg_doppler,
+        'min_doppler': min_doppler,
+        'max_doppler': max_doppler,
+        'std_doppler': std_doppler
     }
 
 def update_global_statistics(global_stats, frame_stats, label):
@@ -211,7 +249,15 @@ def update_global_statistics(global_stats, frame_stats, label):
             'avg_local_density': [],
             'min_local_density': [],
             'max_local_density': [],
-            'std_local_density': []
+            'std_local_density': [],
+            'avg_snr': [],
+            'min_snr': [],
+            'max_snr': [],
+            'std_snr': [],
+            'avg_doppler': [],
+            'min_doppler': [],
+            'max_doppler': [],
+            'std_doppler': []
         }
 
     # Update overall statistics
@@ -234,7 +280,15 @@ def update_global_statistics(global_stats, frame_stats, label):
             'avg_local_density': [],
             'min_local_density': [],
             'max_local_density': [],
-            'std_local_density': []
+            'std_local_density': [],
+            'avg_snr': [],
+            'min_snr': [],
+            'max_snr': [],
+            'std_snr': [],
+            'avg_doppler': [],
+            'min_doppler': [],
+            'max_doppler': [],
+            'std_doppler': []
         }
 
     global_stats['by_label'][label]['count'] += 1
@@ -312,7 +366,7 @@ def extract_point_clouds_from_json(json_file_path, labels_npy_path):
         if 'pointCloud' in frame:
             frame_point_clouds = []
             for point_cloud in frame['pointCloud']:
-                frame_point_clouds.append(point_cloud[:3])
+                frame_point_clouds.append(point_cloud[:5])  # Extract x, y, z, doppler, snr
 
             frame_timestamp = datetime.datetime.strptime(frame['timeStamp'], "%d-%m-%Y-%H-%M-%S-%f")
             timestamp_ms = int(frame_timestamp.timestamp() * 1000)
@@ -337,11 +391,11 @@ def extract_point_clouds_from_json(json_file_path, labels_npy_path):
                 processed_point = process_point_with_zone(point)
                 frame_point_clouds_with_zones.append(processed_point)
 
-            # Calculate local density for each point and add as 5th column
+            # Calculate local density for each point and add as 7th column
             frame_point_clouds_with_density = []
             for i, point in enumerate(frame_point_clouds_with_zones):
                 local_density = calculate_local_density(i, frame_point_clouds_with_zones)
-                point_with_density = point + [local_density]  # [x, y, z, zone_id, local_density]
+                point_with_density = point + [local_density]  # [x, y, z, zone_id, doppler, snr, local_density]
                 frame_point_clouds_with_density.append(point_with_density)
 
             # Calculate statistics for this frame (using points with density)
@@ -375,7 +429,7 @@ def process_scenario_folder(scenario_folder, subject, scenario):
 
     scenario_data, scenario_stats = result
 
-    pickle_file_path = os.path.join("data/raw_carelab_zoned_per_point", f"{subject}_{scenario}.pkl")
+    pickle_file_path = os.path.join("data\\raw_carelab_full_aux", f"{subject}_{scenario}.pkl")
     with open(pickle_file_path, 'wb') as f:
         pickle.dump(scenario_data, f)
 
@@ -411,7 +465,15 @@ def merge_statistics(combined_stats, scenario_stats):
             'avg_local_density': [],
             'min_local_density': [],
             'max_local_density': [],
-            'std_local_density': []
+            'std_local_density': [],
+            'avg_snr': [],
+            'min_snr': [],
+            'max_snr': [],
+            'std_snr': [],
+            'avg_doppler': [],
+            'min_doppler': [],
+            'max_doppler': [],
+            'std_doppler': []
         }
 
     # Merge overall statistics
@@ -435,7 +497,15 @@ def merge_statistics(combined_stats, scenario_stats):
                 'avg_local_density': [],
                 'min_local_density': [],
                 'max_local_density': [],
-                'std_local_density': []
+                'std_local_density': [],
+                'avg_snr': [],
+                'min_snr': [],
+                'max_snr': [],
+                'std_snr': [],
+                'avg_doppler': [],
+                'min_doppler': [],
+                'max_doppler': [],
+                'std_doppler': []
             }
 
         combined_stats['by_label'][label]['count'] += label_stats['count']
@@ -476,5 +546,5 @@ def traverse_and_process_folder(root_folder):
         print_statistics_summary(combined_statistics)
 
 if __name__ == "__main__":
-    root_folder = '/Users/koorosh/Library/CloudStorage/OneDrive-UniversityofToronto/Koorosh-CareLab-Data'
+    root_folder = 'C:\\Users\\Koorosh\\OneDrive - University of Toronto\\Koorosh-CareLab-Data'
     traverse_and_process_folder(root_folder)
