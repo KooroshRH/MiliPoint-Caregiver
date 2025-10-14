@@ -2,7 +2,7 @@
 import torch
 import torch.nn as nn
 from torch.nn import Linear as Lin
-from torch_geometric.nn import MLP, PointTransformerConv, fps, global_mean_pool, knn_graph
+from torch_geometric.nn import MLP, PointTransformerConv, fps, global_mean_pool, knn, knn_graph
 from torch_geometric.utils import scatter
 
 
@@ -51,7 +51,7 @@ class TransitionDown(torch.nn.Module):
         sub_batch = batch[id_clusters] if batch is not None else None
 
         # knn from all points -> sampled centers (edges: (2, E) with [center_idx, neighbor_idx])
-        id_k_neighbor = knn_graph(pos, pos[id_clusters], k=self.k, batch_x=batch, batch_y=sub_batch)
+        id_k_neighbor = knn(pos, pos[id_clusters], k=self.k, batch_x=batch, batch_y=sub_batch)
 
         # transform features
         x_trans = self.mlp(x)
