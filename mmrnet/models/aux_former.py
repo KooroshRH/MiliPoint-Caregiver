@@ -273,13 +273,17 @@ class AuxFormer(nn.Module):
         # Backbone: loop through TransitionDown + Transformer
         curr_pos = pos
         curr_batch = batch
-        curr_aux = aux_flat  # flattened aux aligned to curr_pos (for stage 0)
-        curr_aux_tokens_list = aux_stage_tokens  # list of original per-point aux tokens (aligned to original pos)
+        # Track current aux tokens (downsampled progressively)
+        curr_aux_tokens = aux_stage_tokens[0] if aux_stage_tokens is not None else None  # stage 0: (B*N, d0)
+        # Track cumulative indices mapping current positions back to original positions
+        cumulative_indices = torch.arange(B * N, device=device)
+
         # For later stages we will compute aux_down for each stage using the TransitionDown pooling procedure
         for stage_idx, (td, tr) in enumerate(zip(self.transition_down, self.transformers_down)):
             # td will pool from current x_feat / curr_pos
+            # Pass current aux tokens (aligned with curr_pos) to be downsampled
             x_out, sub_pos, sub_batch, aux_out, id_clusters = td(x_feat, curr_pos, curr_batch,
-                                                                aux=curr_aux_tokens_list[stage_idx] if curr_aux_tokens_list is not None else None)
+                                                                aux=curr_aux_tokens)
             # x_out: (num_clusters_total, dim_next)
             # aux_out: (num_clusters_total, d_next) or None
             # Note: id_clusters are indices into curr_pos (so alignment preserved)
@@ -292,44 +296,30 @@ class AuxFormer(nn.Module):
             edge_index = knn_graph(curr_pos, k=self.k, batch=curr_batch)
             x_feat = tr(x_feat, curr_pos, edge_index)
 
+            # Update cumulative indices: map from new downsampled positions back to original
+            cumulative_indices = cumulative_indices[id_clusters]
+
             # cross-attn fusion for this stage if configured
             if self.apply_cross_attn and self.cross_attn_blocks is not None:
-                # aux_out must be provided and match x_feat dim
-                if aux_out is not None:
-                    # aux_out shape: (num_clusters, d_stage) already matches stage dim (aux_encoder built heads accordingly)
-                    x_feat = self.cross_attn_blocks[stage_idx + 1](x_feat, aux_out)
-                else:
-                    # No aux provided for this stage — skip fusion
-                    pass
+                if aux_stage_tokens is not None and stage_idx + 1 < len(self.cross_attn_blocks):
+                    # Use cumulative_indices to map from current downsampled positions to original positions
+                    # Then get the next stage aux tokens for those original positions
+                    aux_for_fusion = aux_stage_tokens[stage_idx + 1][cumulative_indices]
+                    x_feat = self.cross_attn_blocks[stage_idx + 1](x_feat, aux_for_fusion)
 
-            # prepare curr_aux_tokens_list for next TD if needed:
-            # We don't recompute aux_stage_tokens list here because aux_encoder produced original-level tokens.
-            # But our TransitionDown returned aux_out per stage (pooled), so we don't need further mapping.
+            # Update curr_aux_tokens for next iteration: use next stage's aux tokens mapped via cumulative indices
+            if aux_stage_tokens is not None and stage_idx + 1 < len(aux_stage_tokens):
+                curr_aux_tokens = aux_stage_tokens[stage_idx + 1][cumulative_indices]
+            else:
+                curr_aux_tokens = None
 
         # Final pooling. Optionally use SNR as weight. We need weights aligned to current x positions.
-        if self.use_snr_pooling and (aux is not None):
-            # aux originally was (B, N, aux_dim) -> flatten (B*N, aux_dim)
-            # But after pooling we have curr_pos with num_final_points; we need to map SNR from original aux_flat to curr positions.
-            # Our TransitionDown provided aux_out for the last stage; if present, extract SNR from that aux_out (if head included it)
-            # Simpler: if the aux_out exists and contains SNR-like signal in same index (we didn't track SNR separately),
-            # use the original SNR to map via 1-NN. For simplicity and robustness, re-map using nearest neighbor lookup.
-            orig_pos = pos  # (B*N,3) original positions
-            final_pos = curr_pos  # (M,3) downsampled
-            # Build 1-NN mapping from final_pos -> orig_pos
-            # Use knn_graph with k=1 but note signature expects batch info; we have batch vectors curr_batch and original batch
-            # Build original batch vector
-            orig_batch = batch
-            # Build mapping edges: neighbors from orig_pos -> final_pos
-            # We want for each final_pos the nearest orig index: knn_graph(x=orig_pos, y=final_pos, k=1,...)
-            map_edges = knn_graph(x=orig_pos, y=final_pos, k=1, batch_x=orig_batch, batch_y=curr_batch)
-            # map_edges: (2, E) with first row indices of final_pos, second row indices of orig_pos
-            # Create mapped weights per final point:
-            mapped_weights = torch.zeros(final_pos.shape[0], device=device)
-            # original snr values
-            snr_orig = aux_flat[:, 2] if aux_flat is not None else torch.ones(B * N, device=device)
-            mapped_weights[map_edges[0]] = snr_orig[map_edges[1]].clamp(min=0.0)
-            # normalize mapped_weights (optional)
-            mapped_weights = torch.sigmoid(mapped_weights)  # bring to 0..1
+        if self.use_snr_pooling and (aux_flat is not None):
+            # Use cumulative_indices to map SNR from original positions to current downsampled positions
+            snr_orig = aux_flat[:, 2]  # (B*N,) - SNR is at index 2 in aux features
+            mapped_weights = snr_orig[cumulative_indices].clamp(min=0.0)  # (M_final,)
+            # Normalize weights to [0, 1]
+            mapped_weights = torch.sigmoid(mapped_weights)
             pooled = weighted_global_mean_pool(x_feat, mapped_weights, curr_batch)
         else:
             pooled = global_mean_pool(x_feat, curr_batch)
