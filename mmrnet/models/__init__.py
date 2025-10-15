@@ -10,6 +10,9 @@ from .ensemble_model import EnsembleModel, load_ensemble_from_checkpoint
 from .pointnet_film import PointNetWithFiLM
 from .pointnet_film_density import PointNetWithFiLMDensity
 from .aux_former import AuxFormer
+from .dgcnn_aux import DGCNN_Aux
+from .point_transformer_aux import PointTransformer_Aux
+from .pointnet_aux import PointNet_Aux
 
 model_map = {
     'dgcnn': DGCNN,
@@ -22,5 +25,8 @@ model_map = {
     'ensemble': EnsembleModel,
     'pointnet-film': PointNetWithFiLM,
     'pointnet-film-density': PointNetWithFiLMDensity,
-    'aux_former': AuxFormer
+    'aux_former': AuxFormer,
+    'dgcnn_aux': DGCNN_Aux,
+    'pointtransformer_aux': PointTransformer_Aux,
+    'pointnet_aux': PointNet_Aux
 }
