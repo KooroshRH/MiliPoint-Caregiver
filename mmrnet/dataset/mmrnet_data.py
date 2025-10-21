@@ -690,7 +690,7 @@ class MMRActionData(Dataset):
     fold_number = 0  # Current fold index
     subject_id = None  # Subject ID for LOSO CV
     use_augmentation = False  # Enable data augmentation (disabled by default)
-    use_temporal_format = False  # Use temporal format (T, N, C) instead of concatenated (T*N, C)
+    use_temporal_format = True  # Use temporal format (T, N, C) instead of concatenated (T*N, C)
 
     def _parse_config(self, c):
         """

@@ -75,6 +75,7 @@ def generate_slurm_script(args_dict, checkpoint_dir, output_file):
     """Generate SLURM script with parameters as command-line flags."""
     
     # Build command-line arguments from config parameters
+    temporal_flag = "--dataset_use_temporal_format" if args_dict.get('use_temporal_format', False) else ""
     cmd_args = f"""--dataset_seed {args_dict['seed']} \\
     --dataset_raw_data_path '{args_dict['raw_data_path']}' \\
     --dataset_processed_data '{args_dict['processed_data']}' \\
@@ -88,7 +89,8 @@ def generate_slurm_script(args_dict, checkpoint_dir, output_file):
     --dataset_sampling_rate {args_dict['sampling_rate']} \\
     --dataset_zero_padding {args_dict['zero_padding']} \\
     --dataset_max_points {args_dict['max_points']} \\
-    --dataset_subject_id {args_dict['subject_id']}"""
+    --dataset_subject_id {args_dict['subject_id']} \\
+    {temporal_flag}"""
     
     # Determine if we're in train or test mode
     mode = args_dict['mode']
@@ -215,7 +217,9 @@ Examples:
                         help='Maximum number of points (comma-separated for grid search)')
     parser.add_argument('--subject-id', type=str, default='20', action=MultiNumericAction, value_type=int,
                         help='Subject ID (comma-separated for grid search)')
-    
+    parser.add_argument('--use-temporal-format', action='store_true',
+                        help='Use temporal format (T, N, C) instead of concatenated format (T*N, C) - required for temporal models like DGCNNAuxFusionT')
+
     # Training parameters - with grid search support
     parser.add_argument('-opt', '--optimizer', type=str, default='adam', action=MultiValueAction,
                         help='Pick an optimizer (comma-separated for grid search, e.g., adam,adamw,sgd)')
@@ -357,6 +361,7 @@ Examples:
             'zero_padding': combo[param_names.index('zero_padding')],
             'max_points': combo[param_names.index('max_points')],
             'subject_id': combo[param_names.index('subject_id')],
+            'use_temporal_format': args.use_temporal_format,
             'optimizer': combo[param_names.index('optimizer')],
             'learning_rate': combo[param_names.index('learning_rate')],
             'max_epochs': combo[param_names.index('max_epochs')],

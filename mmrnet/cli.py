@@ -125,6 +125,9 @@ class Main:
         ('-d_forced_rewrite', '--dataset_forced_rewrite'): {
             'action': 'store_true', 'help': 'Force to rewrite the processed data.',
         },
+        ('-d_use_temporal_format', '--dataset_use_temporal_format'): {
+            'action': 'store_true', 'help': 'Use temporal format (T, N, C) instead of concatenated format (T*N, C) - required for temporal models like DGCNNAuxFusionT.',
+        },
         ('-v', '--visualize'): {
             'action': 'store_true', 'help': 'Visualize test result as mp4.',
         },
@@ -237,6 +240,7 @@ class Main:
             'cross_validation': a.dataset_cross_validation,
             'num_folds': a.dataset_num_folds,
             'fold_number': a.dataset_fold_number,
+            'use_temporal_format': a.dataset_use_temporal_format,
         }
         train_loader, val_loader, test_loader, dataset_info = get_dataset(
             name=a.dataset, 
