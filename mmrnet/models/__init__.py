@@ -13,6 +13,7 @@ from .aux_former import AuxFormer
 from .dgcnn_aux import DGCNN_Aux
 from .point_transformer_aux import PointTransformer_Aux
 from .pointnet_aux import PointNet_Aux
+from .dgcnn_aux_fusion_t import DGCNNAuxFusionT
 
 model_map = {
     'dgcnn': DGCNN,
@@ -28,5 +29,6 @@ model_map = {
     'aux_former': AuxFormer,
     'dgcnn_aux': DGCNN_Aux,
     'pointtransformer_aux': PointTransformer_Aux,
-    'pointnet_aux': PointNet_Aux
+    'pointnet_aux': PointNet_Aux,
+    'dgcnn_aux_fusion_t': DGCNNAuxFusionT,
 }
