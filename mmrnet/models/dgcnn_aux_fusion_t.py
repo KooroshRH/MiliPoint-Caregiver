@@ -153,15 +153,10 @@ class DGCNNAuxFusionT(nn.Module):
                 point_branches[f'branch_{i}'] = MLP([dense_layers[-1], 64, 3], norm=None)
             self.output = nn.ModuleDict(point_branches)
         else:
-            # build a classifier MLP: dense_layers sequence -> num_classes
-            self.output = MLP([dense_layers[0], *dense_layers[1:], self.num_classes], dropout=0.5, norm=None)
-
-        # small linear to project temporal-mean back to classifier input dim if needed
-        if dense_layers[0] != dense_layers[-1]:
-            # create a projection to match final MLP input if shapes differ
-            self.temporal_out_proj = Lin(dense_layers[0], dense_layers[-1])
-        else:
-            self.temporal_out_proj = nn.Identity()
+            # build a classifier MLP: after temporal aggregation, features are dense_layers[0]
+            # we need to project through the remaining dense layers to get final classification
+            # Input: dense_layers[0] (1024) -> intermediate layers -> num_classes
+            self.output = MLP([*dense_layers, self.num_classes], dropout=0.5, norm=None)
 
     def forward(self, data):
         """
@@ -224,15 +219,13 @@ class DGCNNAuxFusionT(nn.Module):
             # TransformerEncoder expects (B, T, F) when batch_first=True
             seq_out = self.temporal_encoder(seq)  # (B, T, F)
             # aggregate across time (mean pooling)
-            seq_agg = seq_out.mean(dim=1)  # (B, F)
+            feat = seq_out.mean(dim=1)  # (B, dense0)
         else:
             # just mean across frames
-            seq_agg = pooled_frames.mean(dim=1)  # (B, F)
-
-        # Project to classifier input dim if needed
-        feat = self.temporal_out_proj(seq_agg)  # (B, final_dense)
+            feat = pooled_frames.mean(dim=1)  # (B, dense0)
 
         # Classifier / output head
+        # feat is now (B, dense0=1024), will be passed through MLP with dense_layers
         if self.num_classes is None:
             y = []
             for i in range(self.num_points):
@@ -240,5 +233,5 @@ class DGCNNAuxFusionT(nn.Module):
             y = torch.stack(y, dim=1)
             return y
 
-        logits = self.output(feat)
+        logits = self.output(feat)  # (B, num_classes)
         return logits
