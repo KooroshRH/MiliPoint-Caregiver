@@ -1162,16 +1162,23 @@ class MMRActionData(Dataset):
         """
         Get a single data sample from the MMRActionData dataset.
 
+        The data is stored in temporal format (T, N, C).
+        If use_temporal_format=False, it will be reshaped to concatenated format (T*N, C).
+
         Returns:
-            x: Tensor of shape (T*N, C) for concatenated format or (T, N, C) for temporal format
+            x: Tensor of shape (T, N, C) for temporal format or (T*N, C) for concatenated format
             y: Label tensor
         """
         data_point = self.data[idx]
-        # Choose between temporal format (T, N, C) or concatenated format (T*N, C)
-        if self.use_temporal_format:
-            x = data_point['new_x_temporal']  # Shape: (T, N, C)
-        else:
-            x = data_point['new_x']  # Shape: (T*N, C)
+        x = data_point['new_x']  # Stored as (T, N, C)
+
+        if not self.use_temporal_format:
+            # Reshape from (T, N, C) to (T*N, C) for non-temporal models
+            T, N, C = x.shape
+            x = x.reshape(T * N, C)
+            # Apply normalization to concatenated format
+            x = self._normalize_stack_by_centroid(x)
+
         x = torch.tensor(x, dtype=torch.float32)
         y = torch.tensor(data_point['y'], dtype=self.target_dtype)
         return x, y
@@ -1544,15 +1551,14 @@ class MMRActionData(Dataset):
         """
         Apply temporal frame stacking and padding to create fixed-size sequences.
 
-        This method creates TWO different output formats:
-        1. For temporal models (DGCNNAuxFusionT): frames are kept separate as (T, N, C)
-        2. For non-temporal models (DGCNN_Aux): frames are concatenated as (T*N, C)
+        This method saves ONLY the temporal format (T, N, C) to disk.
+        The concatenated format (T*N, C) is created on-the-fly in get() when needed.
 
         Args:
             data_list: List of data samples with 'x' (keypoints) and 'y' (labels)
 
         Returns:
-            List of processed data samples with both 'new_x' and 'new_x_temporal' fields
+            List of processed data samples with 'new_x' field containing temporal format
         """
         if self.stacks is None:
             logging.info("No frame stacking configured, returning original data")
@@ -1565,7 +1571,6 @@ class MMRActionData(Dataset):
         xs = [d['x'] for d in data_list]
         # Extract action labels from the current data_list for label consistency checking
         ys = [d['y'] for d in data_list]
-        padded_xs = []  # For concatenated format (T*N, C)
         padded_xs_temporal = []  # For temporal format (T, N, C)
 
         logging.info(f"Processing {len(xs)} data samples with temporal stacking...")
@@ -1573,7 +1578,7 @@ class MMRActionData(Dataset):
         pbar = tqdm(total=len(xs), desc="Frame stacking")
 
         if self.zero_padding in ['per_data_point', 'data_point']:
-            logging.info("Using per-data-point padding strategy (preserving temporal structure)")
+            logging.info("Using per-data-point padding strategy (storing temporal format only)")
             zero_frames_added = 0
             total_frames_processed = 0
 
@@ -1598,17 +1603,12 @@ class MMRActionData(Dataset):
                 temporal_stack = np.stack(frames_temporal, axis=0)  # (T, N, 7)
                 padded_xs_temporal.append(temporal_stack)
 
-                # Create concatenated format for non-temporal models: (T*N, C)
-                concatenated_stack = np.concatenate(frames_temporal, axis=0)  # (T*N, 7)
-                normalized_frame = self._normalize_stack_by_centroid(concatenated_stack)
-                padded_xs.append(normalized_frame)
-
                 pbar.update(1)
 
             logging.info(f"Per-data-point stacking completed: {total_frames_processed} real frames, {zero_frames_added} zero-padded frames")
-            logging.info(f"Created temporal format (T={self.stacks}, N={self.max_points}, C=7) and concatenated format")
+            logging.info(f"Stored temporal format (T={self.stacks}, N={self.max_points}, C=7)")
         elif self.zero_padding in ['per_stack', 'stack']:
-            logging.info("Using per-stack padding strategy (preserving temporal structure)")
+            logging.info("Using per-stack padding strategy (storing temporal format only)")
 
             for i in range(len(xs)):
                 # Collect frames separately
@@ -1634,11 +1634,6 @@ class MMRActionData(Dataset):
                 temporal_stack = np.stack(frames_temporal, axis=0)  # (T, N, 7)
                 padded_xs_temporal.append(temporal_stack)
 
-                # Create concatenated format for backward compatibility
-                concatenated_stack = np.concatenate(frames_temporal, axis=0)  # (T*N, 7)
-                normalized_stack = self._normalize_stack_by_centroid(concatenated_stack)
-                padded_xs.append(normalized_stack)
-
                 pbar.update(1)
 
             logging.info(f"Per-stack padding completed with temporal structure preserved")
@@ -1649,11 +1644,10 @@ class MMRActionData(Dataset):
 
         pbar.close()
         logging.info("✓ Frame stacking and padding completed successfully")
-        logging.info(f"  Temporal format: ({self.stacks}, {self.max_points}, 7) per sample")
-        logging.info(f"  Concatenated format: ({self.stacks * self.max_points}, 7) per sample")
+        logging.info(f"  Stored format: ({self.stacks}, {self.max_points}, 7) per sample (temporal)")
+        logging.info(f"  Concatenated format will be generated on-the-fly when use_temporal_format=False")
 
-        # remap both formats to data_list
-        new_data_list = [{**d, 'new_x': x_concat, 'new_x_temporal': x_temp}
-                         for d, x_concat, x_temp in zip(data_list, padded_xs, padded_xs_temporal)]
-        logging.info(f"Created {len(new_data_list)} samples with both temporal and concatenated formats")
+        # remap temporal format to data_list - ONLY store temporal format
+        new_data_list = [{**d, 'new_x': x_temp} for d, x_temp in zip(data_list, padded_xs_temporal)]
+        logging.info(f"Created {len(new_data_list)} samples with temporal format")
         return new_data_list
