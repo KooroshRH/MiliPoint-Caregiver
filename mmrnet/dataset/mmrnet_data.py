@@ -690,6 +690,7 @@ class MMRActionData(Dataset):
     fold_number = 0  # Current fold index
     subject_id = None  # Subject ID for LOSO CV
     use_augmentation = False  # Enable data augmentation (disabled by default)
+    use_temporal_format = False  # Use temporal format (T, N, C) instead of concatenated (T*N, C)
 
     def _parse_config(self, c):
         """
@@ -785,10 +786,12 @@ class MMRActionData(Dataset):
         self.num_keypoints = c.get('num_keypoints', self.num_keypoints)
         self.forced_rewrite = c.get('forced_rewrite', self.forced_rewrite)
         self.use_augmentation = c.get('use_augmentation', self.use_augmentation)
+        self.use_temporal_format = c.get('use_temporal_format', self.use_temporal_format)
 
         logging.info(f"  - Data splits: {self.partitions[0]:.1%} train, {self.partitions[1]:.1%} val, {self.partitions[2]:.1%} test")
         logging.info(f"  - Zero padding strategy: {self.zero_padding}")
         logging.info(f"  - Data augmentation: {'enabled' if self.use_augmentation else 'disabled'}")
+        logging.info(f"  - Temporal format: {'enabled (T,N,C)' if self.use_temporal_format else 'disabled (T*N,C)'}")
         logging.info(f"  - Force rewrite: {'yes' if self.forced_rewrite else 'no'}")
 
         # Validate zero padding style
@@ -1156,8 +1159,19 @@ class MMRActionData(Dataset):
         return self.num_samples
 
     def get(self, idx):
+        """
+        Get a single data sample from the MMRActionData dataset.
+
+        Returns:
+            x: Tensor of shape (T*N, C) for concatenated format or (T, N, C) for temporal format
+            y: Label tensor
+        """
         data_point = self.data[idx]
-        x = data_point['new_x']
+        # Choose between temporal format (T, N, C) or concatenated format (T*N, C)
+        if self.use_temporal_format:
+            x = data_point['new_x_temporal']  # Shape: (T, N, C)
+        else:
+            x = data_point['new_x']  # Shape: (T*N, C)
         x = torch.tensor(x, dtype=torch.float32)
         y = torch.tensor(data_point['y'], dtype=self.target_dtype)
         return x, y
@@ -1530,16 +1544,15 @@ class MMRActionData(Dataset):
         """
         Apply temporal frame stacking and padding to create fixed-size sequences.
 
-        This method:
-        1. Stacks consecutive frames for temporal modeling
-        2. Normalizes each stack by translating to centroid's nearest point
-        3. Pads sequences to fixed size
+        This method creates TWO different output formats:
+        1. For temporal models (DGCNNAuxFusionT): frames are kept separate as (T, N, C)
+        2. For non-temporal models (DGCNN_Aux): frames are concatenated as (T*N, C)
 
         Args:
             data_list: List of data samples with 'x' (keypoints) and 'y' (labels)
 
         Returns:
-            List of processed data samples with 'new_x' field containing stacked frames
+            List of processed data samples with both 'new_x' and 'new_x_temporal' fields
         """
         if self.stacks is None:
             logging.info("No frame stacking configured, returning original data")
@@ -1552,20 +1565,22 @@ class MMRActionData(Dataset):
         xs = [d['x'] for d in data_list]
         # Extract action labels from the current data_list for label consistency checking
         ys = [d['y'] for d in data_list]
-        stacked_xs = []
-        padded_xs = []
+        padded_xs = []  # For concatenated format (T*N, C)
+        padded_xs_temporal = []  # For temporal format (T, N, C)
 
         logging.info(f"Processing {len(xs)} data samples with temporal stacking...")
         logging.info(f"Label distribution: {len(set(ys))} unique actions in current batch")
         pbar = tqdm(total=len(xs), desc="Frame stacking")
 
         if self.zero_padding in ['per_data_point', 'data_point']:
-            logging.info("Using per-data-point padding strategy with centroid normalization")
+            logging.info("Using per-data-point padding strategy (preserving temporal structure)")
             zero_frames_added = 0
             total_frames_processed = 0
 
             for i in range(len(xs)):
-                data_point = []
+                # Collect T frames separately for temporal structure
+                frames_temporal = []
+
                 for j in range(self.stacks):
                     frame_idx = i - j * self.sampling_rate
                     if frame_idx >= 0 and ys[i] == ys[frame_idx]:
@@ -1573,60 +1588,60 @@ class MMRActionData(Dataset):
                         diff = self.max_points - mydata_slice.shape[0]
                         mydata_slice = np.pad(mydata_slice, ((0, max(diff, 0)), (0, 0)), 'constant')
                         mydata_slice = mydata_slice[np.random.choice(len(mydata_slice), self.max_points, replace=False)]
-                        data_point.append(mydata_slice)
+                        frames_temporal.insert(0, mydata_slice)  # Insert at beginning for temporal order
                         total_frames_processed += 1
                     else:
-                        data_point.append(np.zeros((self.max_points, 7)))
+                        frames_temporal.insert(0, np.zeros((self.max_points, 7)))
                         zero_frames_added += 1
 
-                # Concatenate frames and normalize the entire stack
-                stacked_frame = np.concatenate(data_point, axis=0)
-                normalized_frame = self._normalize_stack_by_centroid(stacked_frame)
+                # Create temporal format: (T, N, C) where T=stacks, N=max_points, C=7
+                temporal_stack = np.stack(frames_temporal, axis=0)  # (T, N, 7)
+                padded_xs_temporal.append(temporal_stack)
+
+                # Create concatenated format for non-temporal models: (T*N, C)
+                concatenated_stack = np.concatenate(frames_temporal, axis=0)  # (T*N, 7)
+                normalized_frame = self._normalize_stack_by_centroid(concatenated_stack)
                 padded_xs.append(normalized_frame)
+
                 pbar.update(1)
 
             logging.info(f"Per-data-point stacking completed: {total_frames_processed} real frames, {zero_frames_added} zero-padded frames")
-            logging.info(f"Applied centroid-based normalization and density-based point selection to {len(padded_xs)} stacks")
+            logging.info(f"Created temporal format (T={self.stacks}, N={self.max_points}, C=7) and concatenated format")
         elif self.zero_padding in ['per_stack', 'stack']:
-            logging.info("Using per-stack padding strategy with centroid normalization and density-based selection")
-            total_frames_stacked = 0
+            logging.info("Using per-stack padding strategy (preserving temporal structure)")
 
-            # First phase: stack frames with sampling rate
             for i in range(len(xs)):
-                frames_to_stack = []
-                frames_to_stack.append(xs[i])  # Always include current frame
+                # Collect frames separately
+                frames_temporal = []
 
-                for j in range(1, self.stacks):
+                for j in range(self.stacks):
                     frame_idx = i - j * self.sampling_rate
                     if frame_idx >= 0 and ys[i] == ys[frame_idx]:
-                        frames_to_stack.insert(0, xs[frame_idx])  # Insert at beginning to maintain temporal order
-                    # If frame not available, we don't add anything (will be handled in padding)
+                        frame_data = xs[frame_idx]
+                        # Pad/sample each frame to max_points
+                        diff = self.max_points - frame_data.shape[0]
+                        if diff > 0:
+                            frame_data = np.pad(frame_data, ((0, diff), (0, 0)), 'constant')
+                        elif diff < 0:
+                            # Select max_points using random sampling or density-based
+                            frame_data = self._select_points_by_density(frame_data, self.max_points)
+                        frames_temporal.insert(0, frame_data)
+                    else:
+                        # Zero padding for missing frames
+                        frames_temporal.insert(0, np.zeros((self.max_points, 7)))
 
-                frames_in_stack = len(frames_to_stack)
-                total_frames_stacked += frames_in_stack
-                stacked_xs.append(np.concatenate(frames_to_stack, axis=0))
-                pbar.update(0.33)
+                # Create temporal format: (T, N, C)
+                temporal_stack = np.stack(frames_temporal, axis=0)  # (T, N, 7)
+                padded_xs_temporal.append(temporal_stack)
 
-            logging.info(f"Stacking phase completed: {total_frames_stacked} total frames in {len(stacked_xs)} stacks")
+                # Create concatenated format for backward compatibility
+                concatenated_stack = np.concatenate(frames_temporal, axis=0)  # (T*N, 7)
+                normalized_stack = self._normalize_stack_by_centroid(concatenated_stack)
+                padded_xs.append(normalized_stack)
 
-            # Second phase: normalize each stack by centroid
-            normalized_stacks = []
-            for x in stacked_xs:
-                normalized_x = self._normalize_stack_by_centroid(x)
-                normalized_stacks.append(normalized_x)
-                pbar.update(0.33)
+                pbar.update(1)
 
-            logging.info(f"Normalization phase completed: applied centroid-based normalization to {len(normalized_stacks)} stacks")
-
-            # Third phase: apply padding
-            for x in normalized_stacks:
-                diff = self.max_points * self.stacks - x.shape[0]
-                x = np.pad(x, ((0, max(diff, 0)), (0, 0)), 'constant')
-                x = x[np.random.choice(len(x), self.max_points * self.stacks, replace=False)]
-                padded_xs.append(x)
-                pbar.update(0.34)
-
-            logging.info(f"Padding phase completed: sequences padded/selected to {self.max_points * self.stacks} points each using density-based selection")
+            logging.info(f"Per-stack padding completed with temporal structure preserved")
 
         else:
             logging.error(f"Unknown zero_padding strategy: {self.zero_padding}")
@@ -1634,8 +1649,11 @@ class MMRActionData(Dataset):
 
         pbar.close()
         logging.info("✓ Frame stacking and padding completed successfully")
+        logging.info(f"  Temporal format: ({self.stacks}, {self.max_points}, 7) per sample")
+        logging.info(f"  Concatenated format: ({self.stacks * self.max_points}, 7) per sample")
 
-        # remap padded_xs to data_list
-        new_data_list = [{**d, 'new_x': x} for d, x in zip(data_list, padded_xs)]
-        logging.info(f"Created {len(new_data_list)} samples with stacked temporal features")
+        # remap both formats to data_list
+        new_data_list = [{**d, 'new_x': x_concat, 'new_x_temporal': x_temp}
+                         for d, x_concat, x_temp in zip(data_list, padded_xs, padded_xs_temporal)]
+        logging.info(f"Created {len(new_data_list)} samples with both temporal and concatenated formats")
         return new_data_list
