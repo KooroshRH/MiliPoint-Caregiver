@@ -14,6 +14,7 @@ from .dgcnn_aux import DGCNN_Aux
 from .point_transformer_aux import PointTransformer_Aux
 from .pointnet_aux import PointNet_Aux
 from .dgcnn_aux_fusion_t import DGCNNAuxFusionT
+from .dgcnn_aux_fusion_stattn import DGCNNAuxFusion_STAttn
 
 model_map = {
     'dgcnn': DGCNN,
@@ -31,4 +32,5 @@ model_map = {
     'pointtransformer_aux': PointTransformer_Aux,
     'pointnet_aux': PointNet_Aux,
     'dgcnn_aux_fusion_t': DGCNNAuxFusionT,
+    'dgcnn_aux_fusion_stattn': DGCNNAuxFusion_STAttn,
 }
