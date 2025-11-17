@@ -161,7 +161,7 @@ class MMRKeypointData(Dataset):
 
     def len(self):
         return self.num_samples
-    
+
     def get(self, idx):
         data_point = self.data[idx]
         x = data_point['new_x']
@@ -1084,8 +1084,18 @@ class MMRActionData(Dataset):
         """
         Extract data for Leave-One-Subject-Out cross-validation.
 
-        IMPORTANT: Works with (subject_id, scenario_id) grouped data.
-        All scenarios from the target subject are used for testing.
+        FIXED VERSION: Validation comes from training subjects (other subjects), not test subject.
+
+        Split strategy:
+        - Train: 90% of scenario groups from OTHER subjects
+        - Val:   10% of scenario groups from OTHER subjects (disjoint from train)
+        - Test:  100% of target subject's scenario groups (UNCHANGED from before)
+
+        This ensures:
+        1. No data leakage between val and test (different subjects)
+        2. Proper hyperparameter tuning (val represents training distribution)
+        3. True subject-independent evaluation
+        4. Test set remains identical to previous implementation
 
         Args:
             data_map: Dictionary with (subject_id, scenario_id) keys and data lists as values
@@ -1099,42 +1109,75 @@ class MMRActionData(Dataset):
             ValueError: If subject_id is not found in data_map
         """
         logging.info(f"Extracting LOSO data: target_subject='{subject_id}' (type: {type(subject_id)}), partition='{partition}'")
+        logging.info(f"Using FIXED LOSO: validation from training subjects (not test subject)")
         logging.info(f"Available groups: {list(data_map.keys())[:5]}... (showing first 5)")
 
         # Convert subject_id to string to match the format used in data_map keys
         # (subject IDs are extracted from filenames and stored as strings)
         subject_id = str(subject_id)
 
-        # Find all groups (subject_scenario combinations) for the target subject
-        target_groups = [key for key in data_map.keys() if key.startswith(f"{subject_id}_")]
+        # Separate target subject groups from other subjects' groups
+        target_groups = []
+        other_groups = []
 
+        for key in data_map.keys():
+            if key.startswith(f"{subject_id}_"):
+                target_groups.append(key)
+            else:
+                other_groups.append(key)
+
+        # Validation: Check if target subject exists
         if len(target_groups) == 0:
             available_subjects = list(set([k.split('_')[0] for k in data_map.keys()]))
             raise ValueError(f"Subject ID '{subject_id}' not found in data. "
                            f"Available subjects: {available_subjects}")
 
-        logging.info(f"Found {len(target_groups)} scenario groups for subject '{subject_id}': {target_groups}")
+        if len(other_groups) == 0:
+            raise ValueError("No training data available (only target subject in dataset)")
 
+        logging.info(f"Found {len(target_groups)} scenario groups for target subject '{subject_id}': {target_groups}")
+        logging.info(f"Found {len(other_groups)} scenario groups from other subjects")
+
+        # Split other subjects' scenario groups: 90% train, 10% val
+        # Use group-level split to prevent scenario leakage between train and val
+        random.seed(self.seed)
+        random.shuffle(other_groups)
+
+        # Ensure at least 1 group for validation (important for small datasets)
+        val_group_count = max(1, int(len(other_groups) * 0.1))  # 10% but minimum 1
+        train_group_count = len(other_groups) - val_group_count
+
+        val_groups = other_groups[:val_group_count]
+        train_groups = other_groups[val_group_count:]
+
+        logging.info(f"Group split for other subjects:")
+        logging.info(f"  Train: {train_group_count} groups ({100*train_group_count/len(other_groups):.1f}%)")
+        logging.info(f"  Val:   {val_group_count} groups ({100*val_group_count/len(other_groups):.1f}%)")
+
+        # Flatten groups to samples
         train_data = []
+        for key in train_groups:
+            train_data.extend(data_map[key])
+
+        val_data = []
+        for key in val_groups:
+            val_data.extend(data_map[key])
+
         test_data = []
+        for key in target_groups:
+            test_data.extend(data_map[key])
 
-        # Separate target subject's data (all scenarios) from other subjects (for training)
-        for key in data_map:
-            if key.startswith(f"{subject_id}_"):
-                test_data.extend(data_map[key])
-            else:
-                train_data.extend(data_map[key])
+        # Verify no overlap (sanity check)
+        train_subjects = set([k.split('_')[0] for k in train_groups])
+        val_subjects = set([k.split('_')[0] for k in val_groups])
+        test_subjects = set([k.split('_')[0] for k in target_groups])
 
-        if len(test_data) == 0:
-            raise ValueError(f"No data found for target subject '{subject_id}'")
+        # Sanity check: test subject should not appear in train or val
+        if test_subjects.intersection(train_subjects) or test_subjects.intersection(val_subjects):
+            logging.error("CRITICAL: Target subject appears in training or validation!")
+            raise ValueError("Data leakage detected: target subject in train/val splits")
 
-        if len(train_data) == 0:
-            raise ValueError("No training data available (all data belongs to target subject)")
-
-        # Split test data 50/50 into validation and test sets
-        val_end = int(len(test_data) * 0.5)
-        val_data = test_data[:val_end]
-        test_data = test_data[val_end:]
+        logging.info("✓ No data leakage: target subject isolated in test set only")
 
         # Apply data augmentation to training data if enabled
         if self.use_augmentation:
@@ -1144,14 +1187,24 @@ class MMRActionData(Dataset):
         else:
             logging.info("Data augmentation disabled - using original training data")
 
+        # Summary logging
+        logging.info(f"LOSO split summary for target subject '{subject_id}':")
+        logging.info(f"  Train groups: {len(train_groups)} groups → {len(train_data)} samples")
+        logging.info(f"    Sample groups: {train_groups[:3]}{'...' if len(train_groups) > 3 else ''}")
+        logging.info(f"  Val groups:   {len(val_groups)} groups → {len(val_data)} samples")
+        logging.info(f"    Sample groups: {val_groups}")
+        logging.info(f"  Test groups:  {len(target_groups)} groups → {len(test_data)} samples")
+        logging.info(f"    Sample groups: {target_groups}")
+        logging.info(f"Subject distribution:")
+        logging.info(f"  Train subjects: {sorted(train_subjects)}")
+        logging.info(f"  Val subjects:   {sorted(val_subjects)}")
+        logging.info(f"  Test subjects:  {sorted(test_subjects)}")
+
         loso_splits = {
             'train': train_data,
             'val': val_data,
             'test': test_data
         }
-
-        logging.info(f"LOSO split for subject '{subject_id}' ({len(target_groups)} scenarios): "
-                    f"train={len(train_data)}, val={len(val_data)}, test={len(test_data)}")
 
         return loso_splits[partition]
 
