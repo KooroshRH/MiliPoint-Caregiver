@@ -19,18 +19,22 @@ class EdgeConvAuxLayer(nn.Module):
       - mod_edge = gamma * edge_feat + beta
       - node_out = max_pool(mod_edge, index=i)
     """
-    def __init__(self, in_geom_dim, out_dim, aux_dim, k=20, aggr='max'):
+    def __init__(self, in_geom_dim, out_dim, aux_dim, k=20, aggr='max', use_film_modulation=True):
         super().__init__()
         self.k = k
         self.out_dim = out_dim
         self.aux_dim = aux_dim
         self.aggr = aggr
+        self.use_film_modulation = use_film_modulation
 
         # Edge MLP: input = [geom_i, geom_j - geom_i] -> 2*in_geom_dim
         self.edge_mlp = MLP([2 * in_geom_dim, out_dim, out_dim], plain_last=False)
 
         # Aux MLP: input = [aux_i, aux_j] -> 2*aux_dim -> produce gamma & beta (2*out_dim)
-        self.aux_mlp = MLP([2 * aux_dim, 64, 2 * out_dim], plain_last=True, norm=None)
+        if self.use_film_modulation and aux_dim > 0:
+            self.aux_mlp = MLP([2 * aux_dim, 64, 2 * out_dim], plain_last=True, norm=None)
+        else:
+            self.aux_mlp = None
 
         # Optional normalization on output
         self.norm = nn.LayerNorm(out_dim)
@@ -61,16 +65,20 @@ class EdgeConvAuxLayer(nn.Module):
         # Edge MLP -> raw edge features
         edge_feat = self.edge_mlp(edge_geom)  # (E, out_dim)
 
-        # Aux modulation -> produce gamma & beta
-        gb = self.aux_mlp(edge_aux)  # (E, 2*out_dim)
-        d = gb.shape[-1] // 2
-        gamma = gb[:, :d]
-        beta = gb[:, d:]
+        # Aux modulation -> produce gamma & beta (only if use_film_modulation is True)
+        if self.use_film_modulation and self.aux_mlp is not None:
+            gb = self.aux_mlp(edge_aux)  # (E, 2*out_dim)
+            d = gb.shape[-1] // 2
+            gamma = gb[:, :d]
+            beta = gb[:, d:]
 
-        # Stabilize gamma: around 1.0
-        gamma = torch.sigmoid(gamma + 1.0)  # values roughly (0.5..~1)
-        # Apply FiLM modulation per-edge
-        mod_edge = gamma * edge_feat + beta  # (E, out_dim)
+            # Stabilize gamma: around 1.0
+            gamma = torch.sigmoid(gamma + 1.0)  # values roughly (0.5..~1)
+            # Apply FiLM modulation per-edge
+            mod_edge = gamma * edge_feat + beta  # (E, out_dim)
+        else:
+            # No FiLM modulation: use edge features directly
+            mod_edge = edge_feat
 
         # Aggregate per target node (center)
         out = scatter(mod_edge, idx_target, dim=0, dim_size=geom.size(0), reduce='max')
@@ -94,7 +102,10 @@ class DGCNNAuxFusionT(nn.Module):
                  geom_dim=3,
                  temporal_layers=1,
                  temporal_heads=4,
-                 use_snr_pooling=True):
+                 use_snr_pooling=True,
+                 # Ablation flags
+                 use_film_modulation=True,
+                 use_temporal_pos_embed=True):
         """
         info: dict with 'num_classes' or 'num_keypoints'
         conv_layers: tuple of feature dims for edge conv stacks (same length as original)
@@ -103,6 +114,12 @@ class DGCNNAuxFusionT(nn.Module):
         geom_dim: usually 3 (x,y,z)
         temporal_layers: number of transformer encoder layers for temporal modeling
         temporal_heads: attention heads in temporal transformer
+
+        Ablation flags:
+        use_film_modulation: If False, disables FiLM modulation in EdgeConvAuxLayer (w/o Auxiliary Modulation)
+        use_temporal_pos_embed: If False, disables learnable temporal positional embeddings (w/o Learnable Pos. Embed)
+        Set temporal_layers=0 for w/o Temporal Transformer ablation
+        Set aux_dim=0 for w/o Auxiliary Features ablation
         """
         super().__init__()
         self.k = k
@@ -111,6 +128,10 @@ class DGCNNAuxFusionT(nn.Module):
         self.conv_layers = conv_layers
         self.dense_layers = dense_layers
         self.use_snr_pooling = use_snr_pooling
+
+        # Ablation flags
+        self.use_film_modulation = use_film_modulation
+        self.use_temporal_pos_embed = use_temporal_pos_embed
 
         self.num_classes = info.get('num_classes', None)
 
@@ -121,7 +142,8 @@ class DGCNNAuxFusionT(nn.Module):
             self.edge_layers.append(EdgeConvAuxLayer(in_geom_dim=in_feat,
                                                      out_dim=out_feat,
                                                      aux_dim=aux_dim,
-                                                     k=k))
+                                                     k=k,
+                                                     use_film_modulation=use_film_modulation))
             in_feat = out_feat
 
         # Linear to combine stacked conv outputs per-point (like original DGCNN)
@@ -138,8 +160,11 @@ class DGCNNAuxFusionT(nn.Module):
                                                        dropout=0.1,
                                                        batch_first=True)
             self.temporal_encoder = nn.TransformerEncoder(encoder_layer, num_layers=temporal_layers)
-            # positional encoding for time steps (learnable)
-            self.time_pos_embed = nn.Parameter(torch.randn(1, 64, self.temporal_dim))  # 64 max frames by default
+            # positional encoding for time steps (learnable) - only create if use_temporal_pos_embed is True
+            if use_temporal_pos_embed:
+                self.time_pos_embed = nn.Parameter(torch.randn(1, 64, self.temporal_dim))  # 64 max frames by default
+            else:
+                self.time_pos_embed = None
         else:
             self.temporal_encoder = None
             self.time_pos_embed = None
@@ -207,15 +232,20 @@ class DGCNNAuxFusionT(nn.Module):
 
         # Add time positional embedding (learnable) up to max len
         if self.temporal_encoder is not None:
-            max_pos = self.time_pos_embed.size(1)
-            if T <= max_pos:
-                pos_emb = self.time_pos_embed[:, :T, :].repeat(B, 1, 1)  # (B, T, F)
+            # Only add positional embeddings if use_temporal_pos_embed is True and time_pos_embed exists
+            if self.use_temporal_pos_embed and self.time_pos_embed is not None:
+                max_pos = self.time_pos_embed.size(1)
+                if T <= max_pos:
+                    pos_emb = self.time_pos_embed[:, :T, :].repeat(B, 1, 1)  # (B, T, F)
+                else:
+                    # if T larger than pos table, tile or interpolate (simple tile)
+                    reps = (T + max_pos - 1) // max_pos
+                    pos_emb = self.time_pos_embed.repeat(1, reps, 1)[:, :T, :].repeat(B, 1, 1)
+                seq = pooled_frames + pos_emb  # (B, T, F)
             else:
-                # if T larger than pos table, tile or interpolate (simple tile)
-                reps = (T + max_pos - 1) // max_pos
-                pos_emb = self.time_pos_embed.repeat(1, reps, 1)[:, :T, :].repeat(B, 1, 1)
+                # No positional embeddings
+                seq = pooled_frames  # (B, T, F)
 
-            seq = pooled_frames + pos_emb  # (B, T, F)
             # TransformerEncoder expects (B, T, F) when batch_first=True
             seq_out = self.temporal_encoder(seq)  # (B, T, F)
             # aggregate across time (mean pooling)

@@ -560,6 +560,275 @@ Results on CareLab dataset (5-fold cross-validation, 40-frame stacks):
 | w/o Auxiliary Modulation | 87.8% | -3.6% |
 | w/o Learnable Pos. Embed. | 89.9% | -1.5% |
 
+## Ablation Studies
+
+The DGCNN_AFTNet model supports systematic ablation studies to evaluate the contribution of each architectural component. Model hyperparameters can be controlled via command-line arguments in both `runner.py` (for SLURM submission) and `mm.py` (for direct execution).
+
+### Available Ablation Flags
+
+The following model hyperparameters are supported:
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `--model-temporal-layers` | int | 1 | Number of transformer encoder layers (set to 0 to disable temporal transformer) |
+| `--model-temporal-heads` | int | 4 | Number of attention heads in temporal transformer |
+| `--model-aux-dim` | int | 4 | Number of auxiliary channels (set to 0 for XYZ-only) |
+| `--model-k` | int | 30 | k-NN parameter for graph construction |
+| `--model-no-film-modulation` | flag | False | Disable FiLM modulation (w/o Auxiliary Modulation) |
+| `--model-no-temporal-pos-embed` | flag | False | Disable learnable temporal positional embeddings |
+
+### Core Ablation Experiments
+
+#### 1. w/o Temporal Transformer
+
+**Purpose**: Evaluate the contribution of temporal modeling via transformer encoder.
+
+**Command**:
+```bash
+python runner.py \
+    --model dgcnn_aux_fusion_t \
+    --task mmr_act \
+    --use-temporal-format \
+    --stacks 40 \
+    --fold-number 0 \
+    --batch-size 32 \
+    --learning-rate 1e-4 \
+    --max-epochs 100 \
+    --model-temporal-layers 0
+```
+
+**Effect**: Disables the transformer encoder and uses simple mean pooling over time instead.
+
+#### 2. w/o Auxiliary Modulation (FiLM)
+
+**Purpose**: Assess the impact of Feature-wise Linear Modulation for integrating auxiliary features.
+
+**Command**:
+```bash
+python runner.py \
+    --model dgcnn_aux_fusion_t \
+    --task mmr_act \
+    --use-temporal-format \
+    --stacks 40 \
+    --fold-number 0 \
+    --batch-size 32 \
+    --learning-rate 1e-4 \
+    --max-epochs 100 \
+    --model-no-film-modulation
+```
+
+**Effect**: Disables gamma/beta modulation in EdgeConvAuxLayer. Edge features are used directly without auxiliary-based scaling and shifting.
+
+#### 3. w/o Learnable Positional Embeddings
+
+**Purpose**: Determine if learnable temporal position encoding improves over no positional information.
+
+**Command**:
+```bash
+python runner.py \
+    --model dgcnn_aux_fusion_t \
+    --task mmr_act \
+    --use-temporal-format \
+    --stacks 40 \
+    --fold-number 0 \
+    --batch-size 32 \
+    --learning-rate 1e-4 \
+    --max-epochs 100 \
+    --model-no-temporal-pos-embed
+```
+
+**Effect**: Removes the learnable positional embeddings before the transformer. Frame features are processed without explicit temporal position information.
+
+#### 4. w/o Auxiliary Features
+
+**Purpose**: Quantify the benefit of using auxiliary radar metadata (Zone, Doppler, SNR, Density).
+
+**Command**:
+```bash
+python runner.py \
+    --model dgcnn_aux_fusion_t \
+    --task mmr_act \
+    --use-temporal-format \
+    --stacks 40 \
+    --fold-number 0 \
+    --batch-size 32 \
+    --learning-rate 1e-4 \
+    --max-epochs 100 \
+    --model-aux-dim 0
+```
+
+**Effect**: Uses only geometric (XYZ) coordinates, ignoring auxiliary channels. FiLM modulation is automatically disabled when `aux_dim=0`.
+
+### Running Complete Ablation Study (5-fold CV)
+
+To run all ablations across 5-fold cross-validation:
+
+```bash
+#!/bin/bash
+
+# Baseline (Full Model)
+for fold in 0 1 2 3 4; do
+    python runner.py \
+        --model dgcnn_aux_fusion_t \
+        --task mmr_act \
+        --fold-number $fold \
+        --use-temporal-format \
+        --stacks 40
+done
+
+# Ablation 1: w/o Temporal Transformer
+for fold in 0 1 2 3 4; do
+    python runner.py \
+        --model dgcnn_aux_fusion_t \
+        --task mmr_act \
+        --fold-number $fold \
+        --use-temporal-format \
+        --stacks 40 \
+        --model-temporal-layers 0
+done
+
+# Ablation 2: w/o Auxiliary Modulation
+for fold in 0 1 2 3 4; do
+    python runner.py \
+        --model dgcnn_aux_fusion_t \
+        --task mmr_act \
+        --fold-number $fold \
+        --use-temporal-format \
+        --stacks 40 \
+        --model-no-film-modulation
+done
+
+# Ablation 3: w/o Learnable Pos. Embed
+for fold in 0 1 2 3 4; do
+    python runner.py \
+        --model dgcnn_aux_fusion_t \
+        --task mmr_act \
+        --fold-number $fold \
+        --use-temporal-format \
+        --stacks 40 \
+        --model-no-temporal-pos-embed
+done
+
+# Ablation 4: w/o Auxiliary Features
+for fold in 0 1 2 3 4; do
+    python runner.py \
+        --model dgcnn_aux_fusion_t \
+        --task mmr_act \
+        --fold-number $fold \
+        --use-temporal-format \
+        --stacks 40 \
+        --model-aux-dim 0
+done
+```
+
+### Grid Search Over Ablations
+
+You can perform grid search over multiple parameter values:
+
+```bash
+# Test different temporal layer configurations
+python runner.py \
+    --model dgcnn_aux_fusion_t \
+    --task mmr_act \
+    --fold-number 0 \
+    --use-temporal-format \
+    --model-temporal-layers 0,1,2,3
+
+# Test different k-NN values
+python runner.py \
+    --model dgcnn_aux_fusion_t \
+    --task mmr_act \
+    --fold-number 0 \
+    --use-temporal-format \
+    --model-k 10,20,30,40
+```
+
+### Direct Execution (without SLURM)
+
+You can also run ablations directly using `mm.py`:
+
+```bash
+# Baseline
+python mm.py train mmr_act dgcnn_aux_fusion_t \
+    --dataset_config configs/action/mmr_action_stack_40_point_carelab_5fold_0.toml \
+    --save-name baseline_fold0
+
+# w/o Temporal Transformer
+python mm.py train mmr_act dgcnn_aux_fusion_t \
+    --dataset_config configs/action/mmr_action_stack_40_point_carelab_5fold_0.toml \
+    --model_temporal_layers 0 \
+    --save-name ablation_wo_temporal_fold0
+
+# w/o Auxiliary Modulation
+python mm.py train mmr_act dgcnn_aux_fusion_t \
+    --dataset_config configs/action/mmr_action_stack_40_point_carelab_5fold_0.toml \
+    --model_no_film_modulation \
+    --save-name ablation_wo_film_fold0
+
+# w/o Learnable Pos. Embed
+python mm.py train mmr_act dgcnn_aux_fusion_t \
+    --dataset_config configs/action/mmr_action_stack_40_point_carelab_5fold_0.toml \
+    --model_no_temporal_pos_embed \
+    --save-name ablation_wo_pos_embed_fold0
+
+# w/o Auxiliary Features
+python mm.py train mmr_act dgcnn_aux_fusion_t \
+    --dataset_config configs/action/mmr_action_stack_40_point_carelab_5fold_0.toml \
+    --model_aux_dim 0 \
+    --save-name ablation_wo_aux_fold0
+```
+
+### Combined Ablations
+
+Multiple ablations can be combined to study interaction effects:
+
+```bash
+# Example: No temporal transformer + no FiLM modulation
+python runner.py \
+    --model dgcnn_aux_fusion_t \
+    --task mmr_act \
+    --use-temporal-format \
+    --model-temporal-layers 0 \
+    --model-no-film-modulation
+```
+
+### Notes on Ablations
+
+- **Backward Compatibility**: All default values maintain the original model behavior. Existing training scripts work unchanged.
+- **Automatic Naming**: Checkpoint and output directories automatically include model configuration in the experiment name.
+- **Testing**: When testing a trained model, ensure model hyperparameters match the training configuration.
+- **Model Variants**: All ablation flags work with both `dgcnn_aux_fusion_t` and `dgcnn_aux_fusion_stattn` models.
+
+### Checkpoint and Output Naming
+
+Ablation experiments are automatically identified by postfix naming in checkpoint and output directories:
+
+| Ablation Study | Postfix | Example |
+|----------------|---------|---------|
+| w/o Temporal Transformer | `_woTemporal` | `dgcnn_aux_fusion_t_..._woTemporal` |
+| w/o Auxiliary Modulation | `_woFiLM` | `dgcnn_aux_fusion_t_..._woFiLM` |
+| w/o Learnable Pos. Embed | `_woPosEmbed` | `dgcnn_aux_fusion_t_..._woPosEmbed` |
+| w/o Auxiliary Features | `_woAux` | `dgcnn_aux_fusion_t_..._woAux` |
+| Baseline (Full Model) | *(no postfix)* | `dgcnn_aux_fusion_t_...` |
+
+**Combined ablations** join postfixes with underscores (e.g., `_woTemporal_woFiLM`).
+
+### Quick Start Script
+
+A ready-to-use script is provided for running all 4 ablation studies:
+
+```bash
+# Run all ablations for subjects 1-5 (LOSO cross-validation)
+./run_ablation_studies.sh
+```
+
+This submits 20 jobs total (4 ablations × 5 subjects) with proper naming for easy identification.
+
+To test naming without submitting jobs:
+```bash
+./test_ablation_naming.sh
+```
+
 ## Project Structure
 
 ```

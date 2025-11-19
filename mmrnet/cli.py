@@ -136,6 +136,32 @@ class Main:
             'type': int, 'default': 100, 'help': 'Number of trails to run.',
         },
 
+        # Model hyperparameters for DGCNNAuxFusionT
+        ('-model_temporal_layers', '--model_temporal_layers'): {
+            'type': int, 'default': None, 'help': 'Number of temporal transformer layers (set to 0 for w/o Temporal Transformer ablation).',
+        },
+        ('-model_temporal_heads', '--model_temporal_heads'): {
+            'type': int, 'default': None, 'help': 'Number of attention heads in temporal transformer.',
+        },
+        ('-model_aux_dim', '--model_aux_dim'): {
+            'type': int, 'default': None, 'help': 'Number of auxiliary channels (set to 0 for w/o Auxiliary Features ablation).',
+        },
+        ('-model_use_film_modulation', '--model_use_film_modulation'): {
+            'action': 'store_true', 'help': 'Use FiLM modulation (default True, omit this flag for w/o Auxiliary Modulation ablation).',
+        },
+        ('-model_no_film_modulation', '--model_no_film_modulation'): {
+            'action': 'store_true', 'help': 'Disable FiLM modulation (w/o Auxiliary Modulation ablation).',
+        },
+        ('-model_use_temporal_pos_embed', '--model_use_temporal_pos_embed'): {
+            'action': 'store_true', 'help': 'Use learnable temporal positional embeddings (default True, omit this flag for w/o Pos Embed ablation).',
+        },
+        ('-model_no_temporal_pos_embed', '--model_no_temporal_pos_embed'): {
+            'action': 'store_true', 'help': 'Disable temporal positional embeddings (w/o Learnable Pos. Embed ablation).',
+        },
+        ('-model_k', '--model_k'): {
+            'type': int, 'default': None, 'help': 'k-NN parameter for graph construction.',
+        },
+
     }
 
     def __init__(self):
@@ -251,7 +277,33 @@ class Main:
 
         # get model
         model_cls = model_map[a.model]
-        model = model_cls(info=dataset_info)
+
+        # Build model kwargs from command-line arguments (for models that support these params)
+        model_kwargs = {'info': dataset_info}
+
+        # Add model-specific hyperparameters if provided
+        if a.model_temporal_layers is not None:
+            model_kwargs['temporal_layers'] = a.model_temporal_layers
+        if a.model_temporal_heads is not None:
+            model_kwargs['temporal_heads'] = a.model_temporal_heads
+        if a.model_aux_dim is not None:
+            model_kwargs['aux_dim'] = a.model_aux_dim
+        if a.model_k is not None:
+            model_kwargs['k'] = a.model_k
+
+        # Handle FiLM modulation flag (default True, explicit control via flags)
+        if a.model_no_film_modulation:
+            model_kwargs['use_film_modulation'] = False
+        elif a.model_use_film_modulation:
+            model_kwargs['use_film_modulation'] = True
+
+        # Handle temporal pos embed flag (default True, explicit control via flags)
+        if a.model_no_temporal_pos_embed:
+            model_kwargs['use_temporal_pos_embed'] = False
+        elif a.model_use_temporal_pos_embed:
+            model_kwargs['use_temporal_pos_embed'] = True
+
+        model = model_cls(**model_kwargs)
         return model, train_loader, val_loader, test_loader
 
     def cli_train(self, dataset_custom_args=None, train_custom_args=None):

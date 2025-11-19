@@ -49,13 +49,49 @@ def create_output_paths(args_dict):
     else:
         cv_info = f"fold{args_dict['fold_number']}"
 
+    # Build ablation study postfix based on model hyperparameters
+    ablation_postfix = ""
+    if args_dict['model'] == 'dgcnn_aux_fusion_t':
+        ablation_parts = []
+
+        # Check for temporal layers = 0 (w/o Temporal Transformer)
+        if args_dict.get('model_temporal_layers') == 0:
+            ablation_parts.append("woTemporal")
+        elif args_dict.get('model_temporal_layers') is not None and args_dict['model_temporal_layers'] != 1:
+            ablation_parts.append(f"T{args_dict['model_temporal_layers']}")
+
+        # Check for no FiLM modulation (w/o Auxiliary Modulation)
+        if args_dict.get('model_no_film_modulation', False):
+            ablation_parts.append("woFiLM")
+
+        # Check for no temporal pos embed (w/o Learnable Pos. Embed)
+        if args_dict.get('model_no_temporal_pos_embed', False):
+            ablation_parts.append("woPosEmbed")
+
+        # Check for aux_dim = 0 (w/o Auxiliary Features)
+        if args_dict.get('model_aux_dim') == 0:
+            ablation_parts.append("woAux")
+        elif args_dict.get('model_aux_dim') is not None and args_dict['model_aux_dim'] != 4:
+            ablation_parts.append(f"aux{args_dict['model_aux_dim']}")
+
+        # Check for non-default k value
+        if args_dict.get('model_k') is not None and args_dict['model_k'] != 30:
+            ablation_parts.append(f"k{args_dict['model_k']}")
+
+        # Check for non-default temporal heads
+        if args_dict.get('model_temporal_heads') is not None and args_dict['model_temporal_heads'] != 4:
+            ablation_parts.append(f"H{args_dict['model_temporal_heads']}")
+
+        if ablation_parts:
+            ablation_postfix = "_" + "_".join(ablation_parts)
+
     # Build comprehensive experiment name with all important parameters
     exp_name = (f"{args_dict['model']}_{args_dict['task']}_"
                 f"seed{args_dict['seed']}_stack{args_dict['stacks']}_"
                 f"{args_dict['cross_validation']}_{cv_info}_"
                 f"opt{args_dict['optimizer']}_lr{args_dict['learning_rate']}_"
                 f"bs{args_dict['batch_size']}_ep{args_dict['max_epochs']}_"
-                f"wd{args_dict['weight_decay']}")
+                f"wd{args_dict['weight_decay']}{ablation_postfix}")
 
     # Create checkpoint directory
     checkpoint_dir = os.path.join(args_dict['checkpoint_base'], exp_name)
@@ -73,9 +109,25 @@ def create_output_paths(args_dict):
 
 def generate_slurm_script(args_dict, checkpoint_dir, output_file):
     """Generate SLURM script with parameters as command-line flags."""
-    
+
     # Build command-line arguments from config parameters
     temporal_flag = "--dataset_use_temporal_format" if args_dict.get('use_temporal_format', False) else ""
+
+    # Build model-specific arguments
+    model_args = ""
+    if args_dict.get('model_temporal_layers') is not None:
+        model_args += f" \\\n    --model_temporal_layers {args_dict['model_temporal_layers']}"
+    if args_dict.get('model_temporal_heads') is not None:
+        model_args += f" \\\n    --model_temporal_heads {args_dict['model_temporal_heads']}"
+    if args_dict.get('model_aux_dim') is not None:
+        model_args += f" \\\n    --model_aux_dim {args_dict['model_aux_dim']}"
+    if args_dict.get('model_k') is not None:
+        model_args += f" \\\n    --model_k {args_dict['model_k']}"
+    if args_dict.get('model_no_film_modulation', False):
+        model_args += " \\\n    --model_no_film_modulation"
+    if args_dict.get('model_no_temporal_pos_embed', False):
+        model_args += " \\\n    --model_no_temporal_pos_embed"
+
     cmd_args = f"""--dataset_seed {args_dict['seed']} \\
     --dataset_raw_data_path '{args_dict['raw_data_path']}' \\
     --dataset_processed_data '{args_dict['processed_data']}' \\
@@ -90,7 +142,7 @@ def generate_slurm_script(args_dict, checkpoint_dir, output_file):
     --dataset_zero_padding {args_dict['zero_padding']} \\
     --dataset_max_points {args_dict['max_points']} \\
     --dataset_subject_id {args_dict['subject_id']} \\
-    {temporal_flag}"""
+    {temporal_flag}{model_args}"""
     
     # Determine if we're in train or test mode
     mode = args_dict['mode']
@@ -231,7 +283,21 @@ Examples:
                         help='Batch size for training and evaluation (comma-separated for grid search)')
     parser.add_argument('-wd', '--weight-decay', type=str, default='1e-5', action=MultiNumericAction, value_type=float,
                         help='Weight decay for optimizer regularization (comma-separated for grid search)')
-    
+
+    # Model hyperparameters for ablation studies
+    parser.add_argument('--model-temporal-layers', type=str, default=None, action=MultiNumericAction, value_type=int,
+                        help='Number of temporal transformer layers (set to 0 for w/o Temporal Transformer ablation)')
+    parser.add_argument('--model-temporal-heads', type=str, default=None, action=MultiNumericAction, value_type=int,
+                        help='Number of attention heads in temporal transformer (comma-separated for grid search)')
+    parser.add_argument('--model-aux-dim', type=str, default=None, action=MultiNumericAction, value_type=int,
+                        help='Number of auxiliary channels (set to 0 for w/o Auxiliary Features ablation)')
+    parser.add_argument('--model-k', type=str, default=None, action=MultiNumericAction, value_type=int,
+                        help='k-NN parameter for graph construction (comma-separated for grid search)')
+    parser.add_argument('--model-no-film-modulation', action='store_true',
+                        help='Disable FiLM modulation (w/o Auxiliary Modulation ablation)')
+    parser.add_argument('--model-no-temporal-pos-embed', action='store_true',
+                        help='Disable temporal positional embeddings (w/o Learnable Pos. Embed ablation)')
+
     # Directory parameters
     parser.add_argument('--checkpoint-base', type=str, default='/cluster/projects/kite/koorosh/Output/MiliPointCareLab/checkpoints',
                         help='Base directory for checkpoints')
@@ -310,7 +376,12 @@ Examples:
         'learning_rate': args.learning_rate if isinstance(args.learning_rate, list) else [args.learning_rate],
         'max_epochs': args.max_epochs if isinstance(args.max_epochs, list) else [args.max_epochs],
         'batch_size': args.batch_size if isinstance(args.batch_size, list) else [args.batch_size],
-        'weight_decay': args.weight_decay if isinstance(args.weight_decay, list) else [args.weight_decay]
+        'weight_decay': args.weight_decay if isinstance(args.weight_decay, list) else [args.weight_decay],
+        # Model hyperparameters
+        'model_temporal_layers': [args.model_temporal_layers] if args.model_temporal_layers is not None else [None] if not isinstance(args.model_temporal_layers, list) else args.model_temporal_layers,
+        'model_temporal_heads': [args.model_temporal_heads] if args.model_temporal_heads is not None else [None] if not isinstance(args.model_temporal_heads, list) else args.model_temporal_heads,
+        'model_aux_dim': [args.model_aux_dim] if args.model_aux_dim is not None else [None] if not isinstance(args.model_aux_dim, list) else args.model_aux_dim,
+        'model_k': [args.model_k] if args.model_k is not None else [None] if not isinstance(args.model_k, list) else args.model_k,
     }
     
     # Create all combinations
@@ -386,7 +457,14 @@ Examples:
             'task': args.task,
             'model': args.model,
             'save_name': args.save_name,
-            'accelerator': args.accelerator
+            'accelerator': args.accelerator,
+            # Model hyperparameters
+            'model_temporal_layers': combo[param_names.index('model_temporal_layers')],
+            'model_temporal_heads': combo[param_names.index('model_temporal_heads')],
+            'model_aux_dim': combo[param_names.index('model_aux_dim')],
+            'model_k': combo[param_names.index('model_k')],
+            'model_no_film_modulation': args.model_no_film_modulation,
+            'model_no_temporal_pos_embed': args.model_no_temporal_pos_embed,
         }
         
         # Create dynamic processed data path
