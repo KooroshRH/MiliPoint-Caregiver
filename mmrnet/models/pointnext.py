@@ -98,17 +98,16 @@ class PointNextSetAbstraction(nn.Module):
                             max_num_neighbors=self.nsample)
             edge_index = torch.stack([col, row], dim=0)
 
-            # Group features
-            if features is not None:
-                grouped_features = features[edge_index[1]]
-            else:
-                grouped_features = xyz[edge_index[1]]
-
             # Relative positions
             grouped_xyz = xyz[edge_index[1]] - new_xyz[edge_index[0]]
 
-            # Concatenate
-            grouped_points = torch.cat([grouped_xyz, grouped_features], dim=1)
+            # Group features and concatenate with relative positions
+            if features is not None:
+                grouped_features = features[edge_index[1]]
+                grouped_points = torch.cat([grouped_xyz, grouped_features], dim=1)
+            else:
+                # Only use relative positions when there are no features
+                grouped_points = grouped_xyz
 
             # Apply MLPs
             for conv, bn in zip(self.mlp_convs, self.mlp_bns):
