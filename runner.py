@@ -150,7 +150,13 @@ def generate_slurm_script(args_dict, checkpoint_dir, output_file):
         model_path_arg = f"--save-name '{checkpoint_dir}'"
     else:  # test mode
         model_path_arg = f"--load '{checkpoint_dir}'"
-    
+
+    # Check if model is DeepGCN (requires more GPU memory)
+    model_name = args_dict['model'].lower()
+    gpu_constraint = ""
+    if 'deepgcn' in model_name:
+        gpu_constraint = "\n#SBATCH -C gpu32g"
+
     # Generate SLURM script
     slurm_script = f"""#!/bin/bash
 
@@ -163,7 +169,7 @@ def generate_slurm_script(args_dict, checkpoint_dir, output_file):
 #SBATCH --mem {args_dict['mem']}
 #SBATCH -c {args_dict['cpus']}
 #SBATCH --mail-user {args_dict['mail_user']}
-#SBATCH --mail-type {args_dict['mail_type']}
+#SBATCH --mail-type {args_dict['mail_type']}{gpu_constraint}
 
 TMP=~/tmp
 TMPDIR=~/tmp
