@@ -110,8 +110,13 @@ class DeepGCN(nn.Module):
 
     Input format: (B, N, 3) for vanilla version (XYZ only)
     Output format: (B, num_classes) for classification
+
+    Memory-optimized version with:
+    - Reduced number of layers (7 instead of 14)
+    - Smaller k-NN neighborhood (9 instead of 16)
+    - Gradient checkpointing support
     """
-    def __init__(self, info=None, k=16, num_layers=14, channels=64, aggr='max'):
+    def __init__(self, info=None, k=9, num_layers=7, channels=64, aggr='max'):
         super().__init__()
         self.num_classes = info['num_classes']
         self.k = k
@@ -120,14 +125,15 @@ class DeepGCN(nn.Module):
         # Stem: project input to initial feature dimension
         self.stem = MLP([3, channels, channels], norm='batch', act='relu')
 
-        # Deep GCN layers
+        # Deep GCN layers (reduced from 14 to 7 for memory efficiency)
         self.layers = nn.ModuleList()
         for i in range(num_layers):
             # Progressive channel expansion
             in_ch = channels
             out_ch = channels
-            if i < num_layers // 2:
-                out_ch = channels * 2 if i == num_layers // 4 else channels
+            # Expand channels at layer 2 instead of layer 3.5
+            if i == num_layers // 3:
+                out_ch = channels * 2
 
             self.layers.append(
                 DeepGCNLayer(in_ch, out_ch, k=k, aggr=aggr, norm='batch', act='relu')
