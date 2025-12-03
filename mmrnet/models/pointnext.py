@@ -77,14 +77,22 @@ class PointNextSetAbstraction(nn.Module):
             new_batch: (N',) new batch indices
         """
         if self.group_all:
-            # Global pooling
+            # Global pooling - process all points through MLPs first
             if features is not None:
-                features = torch.cat([xyz, features], dim=1)
+                grouped_points = torch.cat([xyz, features], dim=1)
             else:
-                features = xyz
+                grouped_points = xyz
+
+            # Apply MLPs to all points
+            for conv, bn in zip(self.mlp_convs, self.mlp_bns):
+                grouped_points = self.act(bn(conv(grouped_points)))
 
             # Global max pooling
-            new_features = global_max_pool(features, batch)
+            new_features = global_max_pool(grouped_points, batch)
+
+            # Post-processing with InvResMLP
+            new_features = self.post_mlp(new_features)
+
             new_xyz = xyz.new_zeros((new_features.size(0), 3))
             new_batch = torch.arange(new_features.size(0), device=batch.device)
 
