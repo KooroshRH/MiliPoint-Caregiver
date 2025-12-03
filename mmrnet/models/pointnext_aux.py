@@ -6,6 +6,7 @@ Modified from pointnext.py to support full auxiliary data (XYZ + auxiliary chann
 import torch
 import torch.nn as nn
 from torch_geometric.nn import MLP, fps, global_max_pool, radius, knn
+from torch_geometric.utils import scatter
 
 
 class InvResMLP(nn.Module):
@@ -109,8 +110,10 @@ class PointNextSetAbstraction(nn.Module):
             for conv, bn in zip(self.mlp_convs, self.mlp_bns):
                 grouped_points = self.act(bn(conv(grouped_points)))
 
-            # Max pooling within each group
-            new_features = global_max_pool(grouped_points, edge_index[0])
+            # Max pooling within each group - aggregate from neighbors to center nodes
+            # edge_index[0] contains center node indices for each edge
+            new_features = scatter(grouped_points, edge_index[0], dim=0,
+                                 dim_size=new_xyz.size(0), reduce='max')
 
             # Post-processing with InvResMLP
             new_features = self.post_mlp(new_features)
