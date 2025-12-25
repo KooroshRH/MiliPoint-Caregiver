@@ -19,6 +19,7 @@ setuptools==59.5.0
 Cython==0.29.28
 pandas
 deepspeed
+fvcore
 
 # for docs
 mkdocs-material
