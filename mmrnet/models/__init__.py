@@ -4,6 +4,7 @@ from .mlp import MLP
 from .pointnet import PointNet
 from .point_transformer import PointTransformer
 from .pointmlp import PointMLP
+from .pointmlp_aux import PointMLP_Aux
 from .attdgcnn import AttDGCNN
 from .hybrid_pointnet import HybridPointNet
 from .ensemble_model import EnsembleModel, load_ensemble_from_checkpoint
@@ -26,6 +27,7 @@ model_map = {
     'pointnet': PointNet,
     'pointtransformer': PointTransformer,
     'pointmlp': PointMLP,
+    'pointmlp_aux': PointMLP_Aux,
     'attdgcnn': AttDGCNN,
     'hybrid': HybridPointNet,
     'ensemble': EnsembleModel,

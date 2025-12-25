@@ -1,8 +1,10 @@
 import pytorch_lightning as pl
 import torch
 import numpy as np
+import time
 from torch.optim.lr_scheduler import CosineAnnealingLR
 from sklearn.metrics import f1_score, confusion_matrix
+from fvcore.nn import FlopCountAnalysis, parameter_count
 import seaborn as sns
 import matplotlib.pyplot as plt
 
@@ -39,6 +41,11 @@ class ModelWrapper(pl.LightningModule):
         self.ys = []
         self.y_hats = []
 
+        # For throughput measurement
+        self.test_times = []
+        self.test_batch_sizes = []
+        self.sample_input = None  # Store a sample input for FLOPs calculation
+
     def forward(self, x):
         return self.model(x)
 
@@ -68,7 +75,21 @@ class ModelWrapper(pl.LightningModule):
 
     def test_step(self, batch, batch_idx):
         x, y = batch[0], batch[1]
+
+        # Store sample input for FLOPs calculation (only first batch)
+        if self.sample_input is None:
+            self.sample_input = x[0:1].detach().clone()  # Keep one sample
+
+        # Measure inference time
+        start_time = time.time()
         y_hat = self.forward(x)
+        torch.cuda.synchronize() if torch.cuda.is_available() else None
+        end_time = time.time()
+
+        # Store timing information
+        self.test_times.append(end_time - start_time)
+        self.test_batch_sizes.append(x.shape[0])
+
         loss = self.loss(y_hat, y)
         metric = self.metric(y_hat, y)
 
@@ -127,6 +148,45 @@ class ModelWrapper(pl.LightningModule):
     def on_test_epoch_end(self):
         self.ys = torch.cat(self.ys)
         self.y_hats = torch.cat(self.y_hats)
+
+        # ========== MODEL STATISTICS ==========
+        print("\n" + "="*70)
+        print("MODEL STATISTICS")
+        print("="*70)
+
+        # 1. Count parameters
+        total_params = sum(p.numel() for p in self.model.parameters())
+        trainable_params = sum(p.numel() for p in self.model.parameters() if p.requires_grad)
+        print(f"Total Parameters: {total_params:,}")
+        print(f"Trainable Parameters: {trainable_params:,}")
+
+        # 2. Calculate FLOPs
+        try:
+            if self.sample_input is not None:
+                # Use actual input from test data
+                flops = FlopCountAnalysis(self.model, self.sample_input)
+                total_flops = flops.total()
+                gflops = total_flops / 1e9
+                print(f"FLOPs: {gflops:.2f} GFLOPs")
+                print(f"Input shape for FLOPs: {tuple(self.sample_input.shape)}")
+            else:
+                print("FLOPs: N/A (no sample input available)")
+        except Exception as e:
+            print(f"FLOPs calculation failed: {e}")
+            print("FLOPs: N/A")
+
+        # 3. Calculate throughput
+        if len(self.test_times) > 0:
+            total_time = sum(self.test_times)
+            total_samples = sum(self.test_batch_sizes)
+            throughput = total_samples / total_time
+            print(f"Throughput: {throughput:.2f} (ins./sec.)")
+            print(f"Average Inference Time per Batch: {total_time/len(self.test_times)*1000:.2f} ms")
+        else:
+            print("Throughput: N/A")
+
+        print("="*70 + "\n")
+        # ========================================
 
         # Calculate F1 score before merging
         f1_before_merge = f1_score(self.ys.cpu(), torch.argmax(self.y_hats, axis=1).cpu(), average='macro')
