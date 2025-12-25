@@ -151,11 +151,19 @@ def generate_slurm_script(args_dict, checkpoint_dir, output_file):
     else:  # test mode
         model_path_arg = f"--load '{checkpoint_dir}'"
 
-    # Check if model is DeepGCN (requires more GPU memory)
+    # Check if model requires 32GB GPU memory
     model_name = args_dict['model'].lower()
     gpu_constraint = ""
-    if 'deepgcn' in model_name:
-        gpu_constraint = "\n#SBATCH -C gpu32g"
+
+    # If user specified a GPU constraint, use it
+    if args_dict.get('gpu_constraint'):
+        gpu_constraint = f"\n#SBATCH -C {args_dict['gpu_constraint']}"
+    else:
+        # Otherwise, auto-detect based on model name
+        # List of models that need 32GB GPU
+        models_requiring_32gb = ['deepgcn', 'pointmlp']
+        if any(model in model_name for model in models_requiring_32gb):
+            gpu_constraint = "\n#SBATCH -C gpu32g"
 
     # Generate SLURM script
     slurm_script = f"""#!/bin/bash
@@ -333,7 +341,9 @@ Examples:
                         help='Email for notifications')
     parser.add_argument('--mail-type', type=str, default='ALL',
                         help='Email notification types')
-    
+    parser.add_argument('--gpu-constraint', type=str, default=None,
+                        help='GPU constraint (e.g., gpu32g for 32GB GPU). Auto-set for deepgcn/pointmlp if not specified')
+
     # Environment parameters
     parser.add_argument('--module', type=str, default='python3/3.10.9',
                         help='Python module to load')
