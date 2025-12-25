@@ -1,4 +1,5 @@
-# from https://github.com/ma-xu/pointMLP-pytorch/blob/main/classification_ModelNet40/models/pointmlp.py
+# PointMLP with Auxiliary Features Support
+# Modified from pointmlp.py to support full auxiliary data (XYZ + auxiliary channels)
 
 import torch
 import torch.nn as nn
@@ -44,6 +45,7 @@ class LocalGrouper(nn.Module):
     def __init__(self, channel, groups, kneighbors, use_xyz=True, normalize="center", **kwargs):
         """
         Give xyz[b,p,3] and fea[b,p,d], return new_xyz[b,g,3] and new_fea[b,g,k,d]
+        :param channel: input feature channel (excluding xyz)
         :param groups: groups number
         :param kneighbors: k-nerighbors
         :param kwargs: others
@@ -69,23 +71,29 @@ class LocalGrouper(nn.Module):
         S = self.groups
         xyz = xyz.contiguous()  # xyz [btach, points, xyz]
 
-        # fps_idx = torch.multinomial(torch.linspace(0, N - 1, steps=N).repeat(B, 1).to(xyz.device), num_samples=self.groups, replacement=False).long()
-        # fps_idx = farthest_point_sample(xyz, self.groups).long()
         sample_ratio = S/N
         xbatch = torch.arange(B).repeat_interleave(N).to(xyz.device)
         ybatch = torch.arange(B).repeat_interleave(S).to(xyz.device)
+
+        # Farthest point sampling
         fps_idx = fps(xyz.reshape((B*N, C)), batch=xbatch, ratio=sample_ratio)   # [B* npoint]
         fps_idx = fps_idx - ybatch*N  # [B* npoint]
         fps_idx = fps_idx.reshape((B, S))  # [B, npoint]
+
         new_xyz = index_points(xyz, fps_idx)  # [B, npoint, 3]
         new_points = index_points(points, fps_idx)  # [B, npoint, d]
+
+        # KNN search
         idx = knn(xyz.reshape((B*N, C)), new_xyz.reshape((B*S, C)), self.kneighbors, xbatch, ybatch)[1]
         idx = idx - torch.arange(B).repeat_interleave((S*self.kneighbors)).to(xyz.device)*N
         idx = idx.reshape((B, S, self.kneighbors))
+
         grouped_xyz = index_points(xyz, idx)  # [B, npoint, k, 3]
         grouped_points = index_points(points, idx)  # [B, npoint, k, d]
+
         if self.use_xyz:
             grouped_points = torch.cat([grouped_points, grouped_xyz],dim=-1)  # [B, npoint, k, d+3]
+
         if self.normalize is not None:
             if self.normalize =="center":
                 mean = torch.mean(grouped_points, dim=2, keepdim=True)
@@ -150,8 +158,9 @@ class PreExtraction(nn.Module):
                  activation='relu', use_xyz=True):
         """
         input: [b,g,k,d]: output:[b,d,g]
-        :param channels:
-        :param blocks:
+        :param channels: input feature channels (not including xyz if use_xyz=True)
+        :param out_channels: output channels
+        :param blocks: number of residual blocks
         """
         super(PreExtraction, self).__init__()
         in_channels = 3+2*channels if use_xyz else 2*channels
@@ -165,7 +174,7 @@ class PreExtraction(nn.Module):
         self.operation = nn.Sequential(*operation)
 
     def forward(self, x):
-        b, n, s, d = x.size()  # torch.Size([32, 512, 32, 6])
+        b, n, s, d = x.size()  # torch.Size([B, groups, k, feature_dim])
         x = x.permute(0, 1, 3, 2)
         x = x.reshape(-1, d, s)
         x = self.transfer(x)
@@ -195,17 +204,28 @@ class PosExtraction(nn.Module):
         return self.operation(x)
 
 
-class PointMLP(nn.Module):
-    def __init__(self, info, embed_dim=64, groups=1, res_expansion=1,
+class PointMLP_Aux(nn.Module):
+    """
+    PointMLP model with auxiliary feature support
+
+    Input format: (B, N, C) where C = 7 (XYZ + 4 auxiliary channels)
+    Output format: (B, num_classes) for classification or (B, num_keypoints, 3) for keypoint estimation
+    """
+    def __init__(self, info, in_channels=7, embed_dim=64, groups=1, res_expansion=1,
                  activation="relu", bias=False, use_xyz=True, normalize="anchor",
                  dim_expansion=[2, 2, 2, 2], pre_blocks=[2, 2, 2, 2], pos_blocks=[2, 2, 2, 2],
                  k_neighbors=[12, 12, 12, 12], reducers=[2, 2, 2, 2], **kwargs):
         super().__init__()
         self.stages = len(pre_blocks)
         self.num_classes = info['num_classes']
+        self.in_channels = in_channels
+        self.aux_channels = in_channels - 3  # Number of auxiliary channels
         self.points = info['max_points'] * info['stacks']
 
-        self.embedding = ConvBNReLU1D(3, embed_dim, bias=bias, activation=activation)
+        # Initial embedding with auxiliary features
+        # Input: auxiliary features only (not xyz, as xyz is handled separately in LocalGrouper)
+        self.embedding = ConvBNReLU1D(self.aux_channels, embed_dim, bias=bias, activation=activation)
+
         assert len(pre_blocks) == len(k_neighbors) == len(reducers) == len(pos_blocks) == len(dim_expansion), \
             "Please check stage number consistent for pre_blocks, pos_blocks k_neighbors, reducers."
         self.local_grouper_list = nn.ModuleList()
@@ -255,15 +275,27 @@ class PointMLP(nn.Module):
             for i in range(num_points):
                 point_branches[f'branch_{i}'] = self.classifier(3)
             self.output = torch.nn.ModuleDict(point_branches)
-        else:                           # identification or action 
+        else:                           # identification or action
             self.output = self.classifier(self.num_classes)
 
     def forward(self, data):
-        # Input: (B, N, C) where C can be 3 (XYZ), 4 (XYZ+aux), or 7 (XYZ+4*aux)
-        # Extract only XYZ coordinates (first 3 channels)
-        xyz = data[:, :, :3]                # b, n, 3
-        x = xyz.permute(0, 2, 1)            # b, n, 3 -> b, 3, n
-        x = self.embedding(x)               # B,D,N
+        """
+        Args:
+            data: (B, N, C) where C = in_channels (XYZ + auxiliary)
+        Returns:
+            (B, num_classes) or (B, num_keypoints, 3)
+        """
+        # Input: (B, N, C) where C = 7 (XYZ + 4 auxiliary channels)
+        # Extract XYZ for positions (first 3 channels)
+        xyz = data[:, :, :3]                    # b, n, 3
+
+        # Extract auxiliary features (remaining channels)
+        aux_features = data[:, :, 3:]           # b, n, aux_channels
+
+        # Embed auxiliary features
+        x = aux_features.permute(0, 2, 1)       # b, aux_channels, n
+        x = self.embedding(x)                   # B, embed_dim, N
+
         for i in range(self.stages):
             # Give xyz[b, p, 3] and fea[b, p, d], return new_xyz[b, g, 3] and new_fea[b, g, k, d]
             xyz, x = self.local_grouper_list[i](xyz, x.permute(0, 2, 1))  # [b,g,3]  [b,g,k,d]
