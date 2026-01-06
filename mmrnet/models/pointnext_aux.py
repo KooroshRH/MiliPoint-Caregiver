@@ -1,11 +1,13 @@
 """
 PointNeXt with Auxiliary Features Support
 Modified from pointnext.py to support full auxiliary data (XYZ + auxiliary channels)
+
+Modified for sparse radar point clouds (uses KNN instead of radius search)
 """
 
 import torch
 import torch.nn as nn
-from torch_geometric.nn import MLP, fps, global_max_pool, radius, knn
+from torch_geometric.nn import MLP, fps, global_max_pool, knn
 from torch_geometric.utils import scatter
 
 
@@ -36,12 +38,11 @@ class InvResMLP(nn.Module):
 
 
 class PointNextSetAbstraction(nn.Module):
-    """Set Abstraction module for PointNeXt with auxiliary feature support"""
-    def __init__(self, npoint, radius_val, nsample, in_channel, mlp, group_all=False):
+    """Set Abstraction module for PointNeXt using KNN (robust for sparse point clouds)"""
+    def __init__(self, ratio, k, in_channel, mlp, group_all=False):
         super().__init__()
-        self.npoint = npoint
-        self.radius = radius_val
-        self.nsample = nsample
+        self.ratio = ratio  # FPS sampling ratio
+        self.k = k  # Number of neighbors for KNN
         self.group_all = group_all
 
         # MLP for processing grouped points
@@ -94,14 +95,15 @@ class PointNextSetAbstraction(nn.Module):
 
         else:
             # Sample points using FPS
-            idx = fps(xyz, batch, ratio=self.npoint)
+            idx = fps(xyz, batch, ratio=self.ratio)
             new_xyz = xyz[idx]
             new_batch = batch[idx]
 
-            # Query neighbors using radius search
-            row, col = radius(xyz, new_xyz, self.radius, batch, new_batch,
-                            max_num_neighbors=self.nsample)
-            edge_index = torch.stack([col, row], dim=0)
+            # Query neighbors using KNN (more robust than radius for sparse clouds)
+            edge_index = knn(xyz, new_xyz, self.k, batch, new_batch)
+
+            # edge_index[0] = indices in new_xyz (query points)
+            # edge_index[1] = indices in xyz (source points / neighbors)
 
             # Relative positions
             grouped_xyz = xyz[edge_index[1]] - new_xyz[edge_index[0]]
@@ -111,15 +113,13 @@ class PointNextSetAbstraction(nn.Module):
                 grouped_features = features[edge_index[1]]
                 grouped_points = torch.cat([grouped_xyz, grouped_features], dim=1)
             else:
-                # Only use relative positions when there are no features
                 grouped_points = grouped_xyz
 
             # Apply MLPs
             for conv, bn in zip(self.mlp_convs, self.mlp_bns):
                 grouped_points = self.act(bn(conv(grouped_points)))
 
-            # Max pooling within each group - aggregate from neighbors to center nodes
-            # edge_index[0] contains center node indices for each edge
+            # Max pooling within each group
             new_features = scatter(grouped_points, edge_index[0], dim=0,
                                  dim_size=new_xyz.size(0), reduce='max')
 
@@ -135,30 +135,32 @@ class PointNext_Aux(nn.Module):
 
     Input format: (B, N, C) where C = 7 (XYZ + 4 auxiliary channels)
     Output format: (B, num_classes) for classification
+
+    Modified for sparse radar point clouds with KNN-based grouping
     """
-    def __init__(self, info=None, in_channels=7):
+    def __init__(self, info=None, in_channels=7, k=20):
         super().__init__()
         self.num_classes = info['num_classes']
         self.in_channels = in_channels
         self.aux_channels = in_channels - 3  # Number of auxiliary channels
 
-        # PointNeXt architecture with auxiliary features
-        # SA1: 512 points, radius 0.2, 32 samples
+        # PointNeXt architecture with auxiliary features (KNN-based)
+        # SA1: downsample by 0.5, k neighbors
         # Input: auxiliary features (4 channels)
         self.sa1 = PointNextSetAbstraction(
-            npoint=0.5, radius_val=0.2, nsample=32,
+            ratio=0.5, k=k,
             in_channel=self.aux_channels, mlp=[32, 32, 64]
         )
 
-        # SA2: 128 points, radius 0.4, 64 samples
+        # SA2: downsample by 0.5, k neighbors
         self.sa2 = PointNextSetAbstraction(
-            npoint=0.25, radius_val=0.4, nsample=64,
+            ratio=0.5, k=k,
             in_channel=64, mlp=[64, 64, 128]
         )
 
         # SA3: Global pooling
         self.sa3 = PointNextSetAbstraction(
-            npoint=None, radius_val=None, nsample=None,
+            ratio=None, k=None,
             in_channel=128, mlp=[128, 256, 512], group_all=True
         )
 
