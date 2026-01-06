@@ -20,6 +20,8 @@ Cython==0.29.28
 pandas
 deepspeed
 fvcore
+mamba-ssm>=1.2.0
+causal-conv1d>=1.2.0
 
 # for docs
 mkdocs-material

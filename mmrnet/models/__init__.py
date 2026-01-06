@@ -20,6 +20,13 @@ from .pointnext import PointNext
 from .pointnext_aux import PointNext_Aux
 from .deepgcn import DeepGCN
 from .deepgcn_aux import DeepGCN_Aux
+from .point_transformer_v3 import PointTransformerV3
+from .point_transformer_v3_aux import PointTransformerV3_Aux
+from .pointmamba import PointMamba
+from .pointmamba_aux import PointMamba_Aux
+from .mamba4d import Mamba4D
+from .mamba4d_aux import Mamba4D_Aux
+from .mamba4d_aux_film import Mamba4D_Aux_FiLM
 
 model_map = {
     'dgcnn': DGCNN,
@@ -43,4 +50,11 @@ model_map = {
     'pointnext_aux': PointNext_Aux,
     'deepgcn': DeepGCN,
     'deepgcn_aux': DeepGCN_Aux,
+    'pointtransformerv3': PointTransformerV3,
+    'pointtransformerv3_aux': PointTransformerV3_Aux,
+    'pointmamba': PointMamba,
+    'pointmamba_aux': PointMamba_Aux,
+    'mamba4d': Mamba4D,
+    'mamba4d_aux': Mamba4D_Aux,
+    'mamba4d_aux_film': Mamba4D_Aux_FiLM,
 }
