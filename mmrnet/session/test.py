@@ -21,7 +21,22 @@ def plt_model_load(model, checkpoint):
     return model
 
 
-def test(model, test_loader, plt_trainer_args, load_path, visualize):
+def test(model, test_loader, plt_trainer_args, load_path, visualize,
+         explainability=False, class_names=None, test_dataset=None, num_explain_samples=5):
+    """
+    Test the model and optionally run explainability analysis.
+
+    Args:
+        model: The model to test
+        test_loader: DataLoader for test data
+        plt_trainer_args: PyTorch Lightning trainer arguments
+        load_path: Path to checkpoint to load
+        visualize: Whether to create visualization video
+        explainability: Whether to run explainability analysis
+        class_names: List of class names for explainability visualizations
+        test_dataset: Test dataset object (needed for metadata in explainability)
+        num_explain_samples: Number of samples to visualize per category (TP/FN)
+    """
     plt_model = ModelWrapper(model)
     if load_path is not None:
         if load_path.endswith(".ckpt"):
@@ -47,3 +62,34 @@ def test(model, test_loader, plt_trainer_args, load_path, visualize):
         Y = np.concatenate([r[1] for r in res])
         make_video(Y_pred, Y, filename)
         logging.info(f'Saved {filename}')
+
+    if explainability:
+        logging.info("Running explainability analysis...")
+        from .explainability import run_explainability_analysis
+
+        # Determine output directory based on checkpoint path
+        if load_path.endswith(".ckpt"):
+            output_dir = os.path.dirname(load_path)
+        else:
+            output_dir = load_path.rstrip('/')
+        output_dir = os.path.join(output_dir, 'explainability')
+
+        # Determine device
+        device = 'cuda' if torch.cuda.is_available() else 'cpu'
+
+        # Run explainability analysis
+        results = run_explainability_analysis(
+            model=model,
+            test_loader=test_loader,
+            class_names=class_names,
+            output_dir=output_dir,
+            num_samples=num_explain_samples,
+            device=device,
+            test_dataset=test_dataset
+        )
+
+        logging.info(f"Explainability analysis complete:")
+        logging.info(f"  - True Positives: {results['num_true_positives']}")
+        logging.info(f"  - False Negatives: {results['num_false_negatives']}")
+        logging.info(f"  - Accuracy: {results['accuracy']:.4f}")
+        logging.info(f"  - Results saved to: {output_dir}")

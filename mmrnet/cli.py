@@ -131,6 +131,12 @@ class Main:
         ('-v', '--visualize'): {
             'action': 'store_true', 'help': 'Visualize test result as mp4.',
         },
+        ('-explain', '--explainability'): {
+            'action': 'store_true', 'help': 'Run explainability analysis after testing (DGCNN-AFTNet only). Generates saliency maps, FiLM visualizations, and temporal attention plots.',
+        },
+        ('-explain_samples', '--explainability_samples'): {
+            'type': int, 'default': 5, 'help': 'Number of samples to visualize per category (TP/FN) for explainability (DGCNN-AFTNet only).',
+        },
         # tuner args
         ('-n_trials', '--n_trials'): {
             'type': int, 'default': 100, 'help': 'Number of trails to run.',
@@ -232,7 +238,7 @@ class Main:
                 f'accepts: {", ".join(callables)}.')
         return action()
 
-    def setup_model_and_data(self, a, dataset_custom_args=None):
+    def setup_model_and_data(self, a, dataset_custom_args=None, return_datasets=False):
         # get dataset
         logging.info(f'Loading dataset {a.dataset!r}...')
 
@@ -268,11 +274,19 @@ class Main:
             'fold_number': a.dataset_fold_number,
             'use_temporal_format': a.dataset_use_temporal_format,
         }
-        train_loader, val_loader, test_loader, dataset_info = get_dataset(
-            name=a.dataset, 
-            batch_size=a.batch_size, 
+        result = get_dataset(
+            name=a.dataset,
+            batch_size=a.batch_size,
             workers=a.num_workers,
-            mmr_dataset_config=mmr_dataset_config)
+            mmr_dataset_config=mmr_dataset_config,
+            return_datasets=return_datasets)
+
+        if return_datasets:
+            train_loader, val_loader, test_loader, dataset_info, train_dataset, val_dataset, test_dataset = result
+        else:
+            train_loader, val_loader, test_loader, dataset_info = result
+            train_dataset = val_dataset = test_dataset = None
+
         logging.info(f'Loaded dataset {a.dataset!r}.')
 
         # get model
@@ -304,6 +318,9 @@ class Main:
             model_kwargs['use_temporal_pos_embed'] = True
 
         model = model_cls(**model_kwargs)
+
+        if return_datasets:
+            return model, train_loader, val_loader, test_loader, test_dataset
         return model, train_loader, val_loader, test_loader
 
     def cli_train(self, dataset_custom_args=None, train_custom_args=None):
@@ -341,20 +358,50 @@ class Main:
     def cli_test(self, dataset_custom_args=None):
         a = self.a
 
-        model, train_loader, val_loader, test_loader = self.setup_model_and_data(
-            a, dataset_custom_args=dataset_custom_args)
-        
+        # Check if explainability is requested for unsupported model
+        supported_explainability_models = ['dgcnn_aux_fusion_t', 'dgcnnauxfusiont']
+        if a.explainability and a.model.lower() not in supported_explainability_models:
+            logging.warning(f"Explainability is only supported for DGCNN-AFTNet (dgcnn_aux_fusion_t). "
+                          f"Model '{a.model}' does not support explainability. Disabling explainability.")
+            a.explainability = False
+
+        # Get test_dataset if explainability is enabled (for metadata access)
+        if a.explainability:
+            model, train_loader, val_loader, test_loader, test_dataset = self.setup_model_and_data(
+                a, dataset_custom_args=dataset_custom_args, return_datasets=True)
+        else:
+            model, train_loader, val_loader, test_loader = self.setup_model_and_data(
+                a, dataset_custom_args=dataset_custom_args)
+            test_dataset = None
+
         load_path = a.load_name if a.load_name.endswith(".ckpt") else 'checkpoints/' + a.load_name + '/'
 
         plt_trainer_args = {
             'devices': a.num_devices,
             'accelerator': a.accelerator, 'strategy': a.strategy,}
+
+        # Define class names for the carelab dataset (30 actions)
+        class_names = None
+        if a.dataset == 'mmr_act':
+            class_names = [
+                'Activity_1', 'Activity_2', 'Activity_3', 'Activity_4', 'Activity_5',
+                'Activity_6', 'Activity_7', 'Activity_8', 'Activity_9', 'Activity_10',
+                'Activity_11', 'Activity_12', 'Activity_13', 'Activity_14', 'Activity_15',
+                'Activity_16', 'Activity_17', 'Activity_18', 'Activity_19', 'Activity_20',
+                'Activity_21', 'Activity_22', 'Activity_23', 'Activity_24', 'Activity_25',
+                'Activity_26', 'Activity_27', 'Activity_28', 'Activity_29', 'Activity_30',
+            ]
+
         test_params = {
             'model': model,
             'test_loader': test_loader,
             'plt_trainer_args': plt_trainer_args,
             'load_path': load_path,
             'visualize': a.visualize,
+            'explainability': a.explainability,
+            'class_names': class_names,
+            'test_dataset': test_dataset,
+            'num_explain_samples': a.explainability_samples,
         }
         test(**test_params)
     cli_eval = cli_test

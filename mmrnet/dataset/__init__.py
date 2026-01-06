@@ -25,27 +25,41 @@ transform_map = {
     'mmr_kp': (None, Scale(100)),
 }
 
-def get_dataset(name, batch_size, workers, mmr_dataset_config=None):
+def get_dataset(name, batch_size, workers, mmr_dataset_config=None, return_datasets=False):
+    """
+    Get dataset loaders and info.
+
+    Args:
+        name: Dataset name
+        batch_size: Batch size
+        workers: Number of workers
+        mmr_dataset_config: MMR dataset configuration
+        return_datasets: If True, return dataset objects along with loaders
+
+    Returns:
+        If return_datasets=False: (train_loader, val_loader, test_loader, info)
+        If return_datasets=True: (train_loader, val_loader, test_loader, info, train_dataset, val_dataset, test_dataset)
+    """
     dataset_cls = dataset_map[name]
     pre_transform, transform = transform_map.get(name, (None, None))
     if name in ['mmr_kp', 'mmr_iden', 'mmr_act']:
         train_dataset = dataset_cls(
-            root=f'data/{name}', 
-            partition='train', 
-            transform=transform, 
-            pre_transform=pre_transform, 
+            root=f'data/{name}',
+            partition='train',
+            transform=transform,
+            pre_transform=pre_transform,
             mmr_dataset_config=mmr_dataset_config)
         val_dataset = dataset_cls(
-            root=f'data/{name}', 
-            partition='val', 
-            transform=transform, 
-            pre_transform=pre_transform, 
+            root=f'data/{name}',
+            partition='val',
+            transform=transform,
+            pre_transform=pre_transform,
             mmr_dataset_config=mmr_dataset_config)
         test_dataset = dataset_cls(
-            root=f'data/{name}', 
-            partition='test', 
-            transform=transform, 
-            pre_transform=pre_transform, 
+            root=f'data/{name}',
+            partition='test',
+            transform=transform,
+            pre_transform=pre_transform,
             mmr_dataset_config=mmr_dataset_config)
     else:
         train_dataset = dataset_cls(
@@ -65,4 +79,7 @@ def get_dataset(name, batch_size, workers, mmr_dataset_config=None):
         val_dataset, batch_size=batch_size, shuffle=False, num_workers=workers)
     test_loader = DataLoader(
         test_dataset, batch_size=batch_size, shuffle=False, num_workers=workers)
+
+    if return_datasets:
+        return train_loader, val_loader, test_loader, train_dataset.info, train_dataset, val_dataset, test_dataset
     return train_loader, val_loader, test_loader, train_dataset.info
