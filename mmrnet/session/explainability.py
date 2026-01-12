@@ -303,7 +303,8 @@ class PointCloudExplainer:
         # Store embeddings using a hook
         embeddings = []
 
-        def hook_fn(module, input, output):
+        def hook_fn(module, input):
+            # Pre-hook receives (module, input) only - no output
             # For MLP, the input is a tuple, get first element
             if isinstance(input, tuple):
                 embeddings.append(input[0].detach())
