@@ -131,12 +131,22 @@ def generate_slurm_script(args_dict, checkpoint_dir, output_file):
     # Build test/explainability flags (only for test mode)
     test_flags = ""
     if args_dict['mode'] == 'test':
+        print(f"[DEBUG] Building test flags:")
+        print(f"  - visualize: {args_dict.get('visualize', False)}")
+        print(f"  - explainability: {args_dict.get('explainability', False)}")
+        print(f"  - explainability_samples: {args_dict.get('explainability_samples', 5)}")
+
         if args_dict.get('visualize', False):
             test_flags += " \\\n    --visualize"
+            print(f"  ✓ Added --visualize")
         if args_dict.get('explainability', False):
             test_flags += " \\\n    --explainability"
+            print(f"  ✓ Added --explainability")
             if args_dict.get('explainability_samples', 5) != 5:
                 test_flags += f" \\\n    --explainability_samples {args_dict['explainability_samples']}"
+                print(f"  ✓ Added --explainability_samples {args_dict['explainability_samples']}")
+
+        print(f"[DEBUG] Final test_flags: {repr(test_flags)}")
 
     cmd_args = f"""--dataset_seed {args_dict['seed']} \\
     --dataset_raw_data_path '{args_dict['raw_data_path']}' \\
@@ -210,7 +220,16 @@ python {args_dict['script']} {mode} {args_dict['task']} {args_dict['model']} \\
     -b {args_dict['batch_size']} \\
     -wd {args_dict['weight_decay']}
 """
-    
+
+    # Debug: Print the python command
+    print(f"[DEBUG] Generated Python command:")
+    python_cmd = f"python {args_dict['script']} {mode} {args_dict['task']} {args_dict['model']} {model_path_arg} {cmd_args} -a {args_dict['accelerator']} -opt {args_dict['optimizer']} -lr {args_dict['learning_rate']} -m {args_dict['max_epochs']} -b {args_dict['batch_size']} -wd {args_dict['weight_decay']}"
+    # Check if test_flags is in the command
+    if 'explainability' in python_cmd:
+        print(f"  ✓ Explainability flags found in command")
+    else:
+        print(f"  ✗ Explainability flags NOT found in command")
+
     return slurm_script
 
 class MultiValueAction(argparse.Action):
@@ -499,6 +518,11 @@ Examples:
             'model_k': combo[param_names.index('model_k')],
             'model_no_film_modulation': args.model_no_film_modulation,
             'model_no_temporal_pos_embed': args.model_no_temporal_pos_embed,
+            # Test/Explainability parameters
+            'visualize': args.visualize,
+            'explainability': args.explainability,
+            'explainability_samples': args.explainability_samples,
+            'gpu_constraint': args.gpu_constraint,
         }
         
         # Create dynamic processed data path
