@@ -128,6 +128,16 @@ def generate_slurm_script(args_dict, checkpoint_dir, output_file):
     if args_dict.get('model_no_temporal_pos_embed', False):
         model_args += " \\\n    --model_no_temporal_pos_embed"
 
+    # Build test/explainability flags (only for test mode)
+    test_flags = ""
+    if args_dict['mode'] == 'test':
+        if args_dict.get('visualize', False):
+            test_flags += " \\\n    --visualize"
+        if args_dict.get('explainability', False):
+            test_flags += " \\\n    --explainability"
+            if args_dict.get('explainability_samples', 5) != 5:
+                test_flags += f" \\\n    --explainability_samples {args_dict['explainability_samples']}"
+
     cmd_args = f"""--dataset_seed {args_dict['seed']} \\
     --dataset_raw_data_path '{args_dict['raw_data_path']}' \\
     --dataset_processed_data '{args_dict['processed_data']}' \\
@@ -142,7 +152,7 @@ def generate_slurm_script(args_dict, checkpoint_dir, output_file):
     --dataset_zero_padding {args_dict['zero_padding']} \\
     --dataset_max_points {args_dict['max_points']} \\
     --dataset_subject_id {args_dict['subject_id']} \\
-    {temporal_flag}{model_args}"""
+    {temporal_flag}{model_args}{test_flags}"""
     
     # Determine if we're in train or test mode
     mode = args_dict['mode']
@@ -343,6 +353,14 @@ Examples:
                         help='Email notification types')
     parser.add_argument('--gpu-constraint', type=str, default=None,
                         help='GPU constraint (e.g., gpu32g for 32GB GPU). Auto-set for deepgcn/pointmlp if not specified')
+
+    # Test/Explainability parameters
+    parser.add_argument('--visualize', '-v', action='store_true',
+                        help='Visualize test result as mp4 (test mode only)')
+    parser.add_argument('--explainability', '-explain', action='store_true',
+                        help='Run explainability analysis after testing (DGCNN-AFTNet only)')
+    parser.add_argument('--explainability-samples', '-explain_samples', type=int, default=5,
+                        help='Number of samples to visualize per category (TP/FN) for explainability')
 
     # Environment parameters
     parser.add_argument('--module', type=str, default='python3/3.10.9',
