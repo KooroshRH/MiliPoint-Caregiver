@@ -601,12 +601,12 @@ def run_explainability_analysis(model, test_loader, class_names, output_dir,
         # Compute saliency - create target_class tensor on correct device
         saliency = explainer.compute_point_saliency(x, target_class=torch.tensor([pred], device=device))
 
-        # Get points (XYZ) - move to CPU first
+        # Get points (XYZ) - detach and move to CPU first
         if x.dim() == 4:  # (1, T, N, C)
-            points = x[0, :, :, :3].cpu().numpy()
+            points = x[0, :, :, :3].detach().cpu().numpy()
             sal = saliency[0]
         else:  # (1, N, C)
-            points = x[0, :, :3].cpu().numpy()
+            points = x[0, :, :3].detach().cpu().numpy()
             sal = saliency[0]
 
         class_name = class_names[label] if class_names else str(label)
@@ -656,13 +656,13 @@ def run_explainability_analysis(model, test_loader, class_names, output_dir,
         saliency_true = explainer.compute_point_saliency(x, target_class=torch.tensor([label], device=device))
         saliency_pred = explainer.compute_point_saliency(x, target_class=torch.tensor([pred], device=device))
 
-        # Get points - move to CPU first
+        # Get points - detach and move to CPU first
         if x.dim() == 4:
-            points = x[0, :, :, :3].cpu().numpy()
+            points = x[0, :, :, :3].detach().cpu().numpy()
             sal_true = saliency_true[0]
             sal_pred = saliency_pred[0]
         else:
-            points = x[0, :, :3].cpu().numpy()
+            points = x[0, :, :3].detach().cpu().numpy()
             sal_true = saliency_true[0]
             sal_pred = saliency_pred[0]
 
