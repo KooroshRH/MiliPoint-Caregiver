@@ -358,21 +358,39 @@ class Main:
     def cli_test(self, dataset_custom_args=None):
         a = self.a
 
+        logging.info("="*70)
+        logging.info("CLI TEST FUNCTION CALLED")
+        logging.info("="*70)
+        logging.info(f"Model: {a.model}")
+        logging.info(f"Visualize flag: {a.visualize}")
+        logging.info(f"Explainability flag: {a.explainability}")
+        logging.info(f"Explainability samples: {a.explainability_samples}")
+        logging.info("="*70)
+
         # Check if explainability is requested for unsupported model
         supported_explainability_models = ['dgcnn_aux_fusion_t', 'dgcnnauxfusiont']
         if a.explainability and a.model.lower() not in supported_explainability_models:
+            logging.warning("="*70)
             logging.warning(f"Explainability is only supported for DGCNN-AFTNet (dgcnn_aux_fusion_t). "
                           f"Model '{a.model}' does not support explainability. Disabling explainability.")
+            logging.warning("="*70)
             a.explainability = False
+        elif a.explainability:
+            logging.info(f"✓ Explainability supported for model: {a.model}")
+            logging.info(f"  Will generate {a.explainability_samples} samples per category (TP/FN)")
 
         # Get test_dataset if explainability is enabled (for metadata access)
         if a.explainability:
+            logging.info("Loading model and data WITH test_dataset for explainability...")
             model, train_loader, val_loader, test_loader, test_dataset = self.setup_model_and_data(
                 a, dataset_custom_args=dataset_custom_args, return_datasets=True)
+            logging.info(f"✓ Test dataset loaded: {type(test_dataset)}")
         else:
+            logging.info("Loading model and data WITHOUT test_dataset...")
             model, train_loader, val_loader, test_loader = self.setup_model_and_data(
                 a, dataset_custom_args=dataset_custom_args)
             test_dataset = None
+            logging.info("✓ Model and data loaded")
 
         load_path = a.load_name if a.load_name.endswith(".ckpt") else 'checkpoints/' + a.load_name + '/'
 
@@ -392,6 +410,7 @@ class Main:
                 'Activity_26', 'Activity_27', 'Activity_28', 'Activity_29', 'Activity_30',
             ]
 
+        logging.info("\nPreparing test parameters...")
         test_params = {
             'model': model,
             'test_loader': test_loader,
@@ -403,7 +422,16 @@ class Main:
             'test_dataset': test_dataset,
             'num_explain_samples': a.explainability_samples,
         }
+        logging.info("Test parameters:")
+        logging.info(f"  - visualize: {test_params['visualize']}")
+        logging.info(f"  - explainability: {test_params['explainability']}")
+        logging.info(f"  - num_explain_samples: {test_params['num_explain_samples']}")
+        logging.info(f"  - class_names: {test_params['class_names'] is not None}")
+        logging.info(f"  - test_dataset: {test_params['test_dataset'] is not None}")
+        logging.info(f"  - load_path: {test_params['load_path']}")
+        logging.info("\nCalling test() function...")
         test(**test_params)
+        logging.info("✓ Test completed")
     cli_eval = cli_test
 
     def cli_tune(self):

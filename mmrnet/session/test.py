@@ -37,6 +37,18 @@ def test(model, test_loader, plt_trainer_args, load_path, visualize,
         test_dataset: Test dataset object (needed for metadata in explainability)
         num_explain_samples: Number of samples to visualize per category (TP/FN)
     """
+    logging.info("="*70)
+    logging.info("TEST FUNCTION CALLED")
+    logging.info("="*70)
+    logging.info(f"Model: {model.__class__.__name__}")
+    logging.info(f"Load path: {load_path}")
+    logging.info(f"Visualize: {visualize}")
+    logging.info(f"Explainability: {explainability}")
+    logging.info(f"Explainability samples: {num_explain_samples}")
+    logging.info(f"Class names provided: {class_names is not None}")
+    logging.info(f"Test dataset provided: {test_dataset is not None}")
+    logging.info("="*70)
+
     plt_model = ModelWrapper(model)
     if load_path is not None:
         if load_path.endswith(".ckpt"):
@@ -64,8 +76,16 @@ def test(model, test_loader, plt_trainer_args, load_path, visualize,
         logging.info(f'Saved {filename}')
 
     if explainability:
-        logging.info("Running explainability analysis...")
-        from .explainability import run_explainability_analysis
+        logging.info("\n" + "="*70)
+        logging.info("STARTING EXPLAINABILITY ANALYSIS")
+        logging.info("="*70)
+
+        try:
+            from .explainability import run_explainability_analysis
+            logging.info("✓ Successfully imported explainability module")
+        except Exception as e:
+            logging.error(f"✗ Failed to import explainability module: {e}")
+            return
 
         # Determine output directory based on checkpoint path
         if load_path.endswith(".ckpt"):
@@ -74,22 +94,52 @@ def test(model, test_loader, plt_trainer_args, load_path, visualize,
             output_dir = load_path.rstrip('/')
         output_dir = os.path.join(output_dir, 'explainability')
 
+        logging.info(f"Output directory: {output_dir}")
+        logging.info(f"Creating directory if not exists...")
+        os.makedirs(output_dir, exist_ok=True)
+        logging.info(f"✓ Output directory ready")
+
         # Determine device
         device = 'cuda' if torch.cuda.is_available() else 'cpu'
+        logging.info(f"Device: {device}")
+        logging.info(f"Number of samples to analyze: {num_explain_samples}")
+        logging.info(f"Test loader batches: {len(test_loader)}")
 
         # Run explainability analysis
-        results = run_explainability_analysis(
-            model=model,
-            test_loader=test_loader,
-            class_names=class_names,
-            output_dir=output_dir,
-            num_samples=num_explain_samples,
-            device=device,
-            test_dataset=test_dataset
-        )
+        logging.info("\nCalling run_explainability_analysis()...")
+        logging.info("-"*70)
 
-        logging.info(f"Explainability analysis complete:")
-        logging.info(f"  - True Positives: {results['num_true_positives']}")
-        logging.info(f"  - False Negatives: {results['num_false_negatives']}")
-        logging.info(f"  - Accuracy: {results['accuracy']:.4f}")
-        logging.info(f"  - Results saved to: {output_dir}")
+        try:
+            results = run_explainability_analysis(
+                model=model,
+                test_loader=test_loader,
+                class_names=class_names,
+                output_dir=output_dir,
+                num_samples=num_explain_samples,
+                device=device,
+                test_dataset=test_dataset
+            )
+
+            logging.info("-"*70)
+            logging.info("✓ Explainability analysis completed successfully!")
+            logging.info("="*70)
+            logging.info("EXPLAINABILITY RESULTS:")
+            logging.info("="*70)
+            logging.info(f"  True Positives: {results['num_true_positives']}")
+            logging.info(f"  False Negatives: {results['num_false_negatives']}")
+            logging.info(f"  Accuracy: {results['accuracy']:.4f}")
+            logging.info(f"  Results saved to: {output_dir}")
+            logging.info("="*70)
+
+        except Exception as e:
+            logging.error("="*70)
+            logging.error("✗ EXPLAINABILITY ANALYSIS FAILED")
+            logging.error("="*70)
+            logging.error(f"Error type: {type(e).__name__}")
+            logging.error(f"Error message: {str(e)}")
+            import traceback
+            logging.error("Full traceback:")
+            logging.error(traceback.format_exc())
+            logging.error("="*70)
+    else:
+        logging.info("Explainability analysis not requested (explainability=False)")

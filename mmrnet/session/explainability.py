@@ -489,11 +489,26 @@ def run_explainability_analysis(model, test_loader, class_names, output_dir,
         device: Device to use
         test_dataset: Optional dataset object to access metadata (subject_id, scenario_id)
     """
+    logging.info("="*70)
+    logging.info("EXPLAINABILITY ANALYSIS STARTED")
+    logging.info("="*70)
+    logging.info(f"Model type: {type(model).__name__}")
+    logging.info(f"Device: {device}")
+    logging.info(f"Output directory: {output_dir}")
+    logging.info(f"Number of samples: {num_samples}")
+    logging.info(f"Test loader batches: {len(test_loader)}")
+    logging.info(f"Class names provided: {class_names is not None}")
+    logging.info(f"Test dataset provided: {test_dataset is not None}")
+
+    logging.info("\nCreating output directories...")
     os.makedirs(output_dir, exist_ok=True)
     os.makedirs(os.path.join(output_dir, 'true_positives'), exist_ok=True)
     os.makedirs(os.path.join(output_dir, 'false_negatives'), exist_ok=True)
+    logging.info("✓ Directories created")
 
+    logging.info("\nInitializing PointCloudExplainer...")
     explainer = PointCloudExplainer(model, device)
+    logging.info("✓ Explainer initialized")
 
     # Collect predictions and metadata
     all_data = []
@@ -501,10 +516,14 @@ def run_explainability_analysis(model, test_loader, class_names, output_dir,
     all_preds = []
     all_metadata = []  # Store subject_id, scenario_id for each sample
 
-    logging.info("Collecting predictions...")
+    logging.info("\n" + "-"*70)
+    logging.info("STEP 1: Collecting predictions from test data")
+    logging.info("-"*70)
     model.eval()
+    logging.info("Model set to eval mode")
 
     sample_idx = 0
+    batch_count = 0
     with torch.no_grad():
         for batch in tqdm(test_loader, desc="Evaluating"):
             x, y = batch[0].to(device), batch[1].to(device)
@@ -514,6 +533,10 @@ def run_explainability_analysis(model, test_loader, class_names, output_dir,
             all_data.append(x.cpu())
             all_labels.append(y.cpu())
             all_preds.append(preds.cpu())
+
+            batch_count += 1
+            if batch_count % 10 == 0:
+                logging.info(f"  Processed {batch_count} batches, {sample_idx} samples so far...")
 
             # Collect metadata if dataset is available
             batch_size = x.shape[0]
@@ -534,24 +557,39 @@ def run_explainability_analysis(model, test_loader, class_names, output_dir,
                 all_metadata.append(metadata)
                 sample_idx += 1
 
+    logging.info(f"✓ Collected {len(all_data)} batches")
+
     all_data = torch.cat(all_data, dim=0)
     all_labels = torch.cat(all_labels, dim=0)
     all_preds = torch.cat(all_preds, dim=0)
 
+    logging.info(f"Total samples: {len(all_data)}")
+    logging.info(f"Data shape: {all_data.shape}")
+
     # Identify True Positives and False Negatives
+    logging.info("\n" + "-"*70)
+    logging.info("STEP 2: Identifying True Positives and False Negatives")
+    logging.info("-"*70)
     correct_mask = all_preds == all_labels
     tp_indices = torch.where(correct_mask)[0]
     fn_indices = torch.where(~correct_mask)[0]
 
-    logging.info(f"Found {len(tp_indices)} True Positives, {len(fn_indices)} False Negatives")
+    logging.info(f"✓ Found {len(tp_indices)} True Positives")
+    logging.info(f"✓ Found {len(fn_indices)} False Negatives")
+    logging.info(f"Accuracy: {len(tp_indices) / len(all_labels) * 100:.2f}%")
 
     # Sample indices
+    logging.info(f"\nSampling {num_samples} True Positives and {num_samples} False Negatives...")
     tp_sample_idx = tp_indices[torch.randperm(len(tp_indices))[:num_samples]].tolist()
     fn_sample_idx = fn_indices[torch.randperm(len(fn_indices))[:num_samples]].tolist()
+    logging.info(f"✓ Sampled {len(tp_sample_idx)} TP and {len(fn_sample_idx)} FN")
 
     # Process True Positives
-    logging.info("Generating True Positive visualizations...")
+    logging.info("\n" + "-"*70)
+    logging.info("STEP 3: Generating True Positive visualizations")
+    logging.info("-"*70)
     for i, idx in enumerate(tqdm(tp_sample_idx, desc="True Positives")):
+        logging.info(f"Processing TP {i+1}/{len(tp_sample_idx)}: sample index {idx}")
         x = all_data[idx:idx+1]
         label = all_labels[idx].item()
         pred = all_preds[idx].item()
@@ -705,7 +743,14 @@ def run_explainability_analysis(model, test_loader, class_names, output_dir,
                 save_path=os.path.join(output_dir, f'film_{layer_name}.png')
             )
 
-    logging.info(f"Explainability analysis complete. Results saved to {output_dir}")
+    logging.info("\n" + "="*70)
+    logging.info("EXPLAINABILITY ANALYSIS COMPLETE!")
+    logging.info("="*70)
+    logging.info(f"Total visualizations generated:")
+    logging.info(f"  - True Positives: {len(tp_sample_idx)} samples")
+    logging.info(f"  - False Negatives: {len(fn_sample_idx)} samples")
+    logging.info(f"Output saved to: {output_dir}")
+    logging.info("="*70)
 
     return {
         'num_true_positives': len(tp_indices),
