@@ -92,11 +92,14 @@ class PointCloudExplainer:
         if target_class is None:
             target_class = output.argmax(dim=1)
 
+        # Ensure target_class is on the same device as output
+        target_class = target_class.to(output.device)
+
         # Compute gradient of target class score w.r.t. input
         self.model.zero_grad()
 
         # One-hot encode target
-        one_hot = torch.zeros_like(output)
+        one_hot = torch.zeros_like(output).to(output.device)
         one_hot.scatter_(1, target_class.unsqueeze(1), 1)
 
         # Backward pass
@@ -590,20 +593,20 @@ def run_explainability_analysis(model, test_loader, class_names, output_dir,
     logging.info("-"*70)
     for i, idx in enumerate(tqdm(tp_sample_idx, desc="True Positives")):
         logging.info(f"Processing TP {i+1}/{len(tp_sample_idx)}: sample index {idx}")
-        x = all_data[idx:idx+1]
+        x = all_data[idx:idx+1].to(device)  # Ensure data is on correct device
         label = all_labels[idx].item()
         pred = all_preds[idx].item()
         metadata = all_metadata[idx]
 
-        # Compute saliency
-        saliency = explainer.compute_point_saliency(x, target_class=torch.tensor([pred]))
+        # Compute saliency - create target_class tensor on correct device
+        saliency = explainer.compute_point_saliency(x, target_class=torch.tensor([pred], device=device))
 
-        # Get points (XYZ)
+        # Get points (XYZ) - move to CPU first
         if x.dim() == 4:  # (1, T, N, C)
-            points = x[0, :, :, :3].numpy()
+            points = x[0, :, :, :3].cpu().numpy()
             sal = saliency[0]
         else:  # (1, N, C)
-            points = x[0, :, :3].numpy()
+            points = x[0, :, :3].cpu().numpy()
             sal = saliency[0]
 
         class_name = class_names[label] if class_names else str(label)
@@ -639,23 +642,27 @@ def run_explainability_analysis(model, test_loader, class_names, output_dir,
                 )
 
     # Process False Negatives
-    logging.info("Generating False Negative visualizations...")
+    logging.info("\n" + "-"*70)
+    logging.info("STEP 4: Generating False Negative visualizations")
+    logging.info("-"*70)
     for i, idx in enumerate(tqdm(fn_sample_idx, desc="False Negatives")):
-        x = all_data[idx:idx+1]
+        logging.info(f"Processing FN {i+1}/{len(fn_sample_idx)}: sample index {idx}")
+        x = all_data[idx:idx+1].to(device)  # Ensure data is on correct device
         label = all_labels[idx].item()
         pred = all_preds[idx].item()
         metadata = all_metadata[idx]
 
-        # Compute saliency for both true and predicted class
-        saliency_true = explainer.compute_point_saliency(x, target_class=torch.tensor([label]))
-        saliency_pred = explainer.compute_point_saliency(x, target_class=torch.tensor([pred]))
+        # Compute saliency for both true and predicted class - create tensors on correct device
+        saliency_true = explainer.compute_point_saliency(x, target_class=torch.tensor([label], device=device))
+        saliency_pred = explainer.compute_point_saliency(x, target_class=torch.tensor([pred], device=device))
 
+        # Get points - move to CPU first
         if x.dim() == 4:
-            points = x[0, :, :, :3].numpy()
+            points = x[0, :, :, :3].cpu().numpy()
             sal_true = saliency_true[0]
             sal_pred = saliency_pred[0]
         else:
-            points = x[0, :, :3].numpy()
+            points = x[0, :, :3].cpu().numpy()
             sal_true = saliency_true[0]
             sal_pred = saliency_pred[0]
 
