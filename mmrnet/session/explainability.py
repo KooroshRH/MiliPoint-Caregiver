@@ -20,6 +20,9 @@ import matplotlib.cm as cm
 from matplotlib.colors import Normalize
 from tqdm import tqdm
 import logging
+from scipy.stats import pearsonr, spearmanr
+from sklearn.manifold import TSNE
+import seaborn as sns
 
 
 class PointCloudExplainer:
@@ -42,6 +45,7 @@ class PointCloudExplainer:
         self.activations = {}
         self.gradients = {}
         self.film_params = {}
+        self.embeddings = None  # For storing feature embeddings
 
     def _register_hooks(self):
         """Register forward and backward hooks to capture activations and gradients."""
@@ -284,36 +288,95 @@ class PointCloudExplainer:
 
         return None
 
+    def extract_embeddings(self, x):
+        """
+        Extract feature embeddings from the model before final classification layer.
+
+        Args:
+            x: Input tensor (B, T, N, C) or (B, N, C)
+
+        Returns:
+            embeddings: (B, D) feature embeddings
+        """
+        x = x.to(self.device)
+
+        # Store embeddings using a hook
+        embeddings = []
+
+        def hook_fn(module, input, output):
+            # For MLP, the input is a tuple, get first element
+            if isinstance(input, tuple):
+                embeddings.append(input[0].detach())
+            else:
+                embeddings.append(input.detach())
+
+        # Find the output layer and hook before it
+        hook = None
+        if hasattr(self.model, 'output'):
+            # For DGCNNAuxFusionT and similar models with self.output
+            hook = self.model.output.register_forward_pre_hook(hook_fn)
+        elif hasattr(self.model, 'linear'):
+            # Hook before final linear layer
+            hook = self.model.linear.register_forward_pre_hook(hook_fn)
+        elif hasattr(self.model, 'fc'):
+            hook = self.model.fc.register_forward_pre_hook(hook_fn)
+        elif hasattr(self.model, 'classifier'):
+            hook = self.model.classifier.register_forward_pre_hook(hook_fn)
+
+        with torch.no_grad():
+            _ = self.model(x)
+
+        if hook is not None:
+            hook.remove()
+
+        if embeddings:
+            emb = embeddings[0]
+            # Handle case where embedding might have extra dimensions
+            if emb.dim() > 2:
+                emb = emb.view(emb.size(0), -1)
+            return emb.cpu().numpy()
+        else:
+            # Fallback: use model output as embeddings
+            logging.warning("Could not find embedding layer, using model output")
+            with torch.no_grad():
+                output = self.model(x)
+            return output.cpu().numpy()
+
 
 def visualize_point_saliency_3d(points, saliency, title="Point Saliency", save_path=None,
-                                  frame_idx=None, view_angles=(30, 45)):
+                                  frame_idx=None, view_angles=(30, 45), radar_height=2.20):
     """
-    Visualize point cloud with saliency coloring in 3D.
+    Visualize point cloud with saliency coloring in 3D from radar's perspective.
 
     Args:
-        points: (N, 3) or (T, N, 3) point coordinates
+        points: (N, 3) or (T, N, 3) point coordinates in radar frame
         saliency: (N,) or (T, N) saliency scores
         title: Plot title
         save_path: Path to save figure
         frame_idx: If temporal data, which frame to visualize (None = average)
         view_angles: (elevation, azimuth) for 3D view
+        radar_height: Height of radar above ground (default 2.20m)
     """
     fig = plt.figure(figsize=(12, 10))
     ax = fig.add_subplot(111, projection='3d')
 
     if points.ndim == 3:  # Temporal data (T, N, 3)
         if frame_idx is not None:
-            pts = points[frame_idx]
+            pts = points[frame_idx].copy()
             sal = saliency[frame_idx]
             title += f" (Frame {frame_idx})"
         else:
             # Average across frames
-            pts = points.reshape(-1, 3)
+            pts = points.reshape(-1, 3).copy()
             sal = saliency.flatten()
             title += " (All Frames)"
     else:
-        pts = points
+        pts = points.copy()
         sal = saliency
+
+    # Adjust Z coordinates: radar is at height 2.20m, so add radar_height to z
+    # This converts from radar frame (z=0 at radar) to ground frame (z=0 at ground)
+    pts[:, 2] = pts[:, 2] + radar_height
 
     # Create colormap
     norm = Normalize(vmin=sal.min(), vmax=sal.max())
@@ -322,11 +385,21 @@ def visualize_point_saliency_3d(points, saliency, title="Point Saliency", save_p
     scatter = ax.scatter(pts[:, 0], pts[:, 1], pts[:, 2],
                         c=sal, cmap='hot', s=50, alpha=0.8)
 
-    ax.set_xlabel('X')
-    ax.set_ylabel('Y')
-    ax.set_zlabel('Z')
+    ax.set_xlabel('X (m)')
+    ax.set_ylabel('Y (m)')
+    ax.set_zlabel('Z (m) - Height from Ground')
     ax.set_title(title)
+
+    # Set viewing angle from radar's perspective
+    # Radar is at (0, 0, radar_height) looking down and forward
+    # elevation: angle above horizontal (negative = looking down)
+    # azimuth: rotation around z-axis
     ax.view_init(elev=view_angles[0], azim=view_angles[1])
+
+    # Add radar position marker
+    ax.scatter([0], [0], [radar_height], c='red', marker='^', s=200,
+              label=f'Radar Position (0, 0, {radar_height}m)', edgecolors='black', linewidths=2)
+    ax.legend(loc='upper right')
 
     plt.colorbar(scatter, ax=ax, label='Saliency Score')
 
@@ -340,36 +413,40 @@ def visualize_point_saliency_3d(points, saliency, title="Point Saliency", save_p
 
 
 def visualize_point_saliency_2d(points, saliency, title="Point Saliency", save_path=None,
-                                  frame_idx=None):
+                                  frame_idx=None, radar_height=2.20):
     """
-    Visualize point cloud saliency in 2D projections (XY, XZ, YZ).
+    Visualize point cloud saliency in 2D projections (XY, XZ, YZ) from radar's perspective.
 
     Args:
-        points: (N, 3) or (T, N, 3) point coordinates
+        points: (N, 3) or (T, N, 3) point coordinates in radar frame
         saliency: (N,) or (T, N) saliency scores
         title: Plot title
         save_path: Path to save figure
         frame_idx: If temporal data, which frame to visualize
+        radar_height: Height of radar above ground (default 2.20m)
     """
     fig, axes = plt.subplots(1, 3, figsize=(15, 5))
 
     if points.ndim == 3:
         if frame_idx is not None:
-            pts = points[frame_idx]
+            pts = points[frame_idx].copy()
             sal = saliency[frame_idx]
             title += f" (Frame {frame_idx})"
         else:
-            pts = points.reshape(-1, 3)
+            pts = points.reshape(-1, 3).copy()
             sal = saliency.flatten()
             title += " (All Frames)"
     else:
-        pts = points
+        pts = points.copy()
         sal = saliency
 
+    # Adjust Z coordinates: radar is at height 2.20m
+    pts[:, 2] = pts[:, 2] + radar_height
+
     projections = [
-        (pts[:, 0], pts[:, 1], 'X', 'Y', 'XY Projection'),
-        (pts[:, 0], pts[:, 2], 'X', 'Z', 'XZ Projection'),
-        (pts[:, 1], pts[:, 2], 'Y', 'Z', 'YZ Projection')
+        (pts[:, 0], pts[:, 1], 'X (m)', 'Y (m)', 'XY Projection (Top View)'),
+        (pts[:, 0], pts[:, 2], 'X (m)', 'Z (m) - Height', 'XZ Projection (Side View)'),
+        (pts[:, 1], pts[:, 2], 'Y (m)', 'Z (m) - Height', 'YZ Projection (Front View)')
     ]
 
     for ax, (x, y, xlabel, ylabel, proj_title) in zip(axes, projections):
@@ -379,6 +456,18 @@ def visualize_point_saliency_2d(points, saliency, title="Point Saliency", save_p
         ax.set_title(proj_title)
         ax.set_aspect('equal')
         plt.colorbar(scatter, ax=ax, label='Saliency')
+
+        # Add radar position marker (x=0, y=0, z=radar_height)
+        if 'X' in xlabel and 'Y' in ylabel:  # XY projection
+            ax.scatter([0], [0], c='red', marker='^', s=100, edgecolors='black',
+                      linewidths=1.5, label='Radar', zorder=10)
+            ax.legend(loc='upper right', fontsize=8)
+        elif 'X' in xlabel and 'Z' in ylabel:  # XZ projection
+            ax.axhline(y=radar_height, color='red', linestyle='--', linewidth=1, alpha=0.7, label='Radar Height')
+            ax.legend(loc='upper right', fontsize=8)
+        elif 'Y' in xlabel and 'Z' in ylabel:  # YZ projection
+            ax.axhline(y=radar_height, color='red', linestyle='--', linewidth=1, alpha=0.7, label='Radar Height')
+            ax.legend(loc='upper right', fontsize=8)
 
     fig.suptitle(title, fontsize=14)
     plt.tight_layout()
@@ -472,6 +561,196 @@ def visualize_film_modulation(gamma, beta, aux_names=None, title="FiLM Modulatio
 
     if save_path:
         plt.savefig(save_path, dpi=150, bbox_inches='tight')
+        plt.close()
+    else:
+        plt.show()
+
+
+def visualize_doppler_saliency_correlation(points, saliency, aux_features, title="Doppler-Saliency Correlation", save_path=None):
+    """
+    Visualize correlation between auxiliary features (Doppler, SNR, Density) and saliency scores.
+
+    Args:
+        points: (N, 3) or (T, N, 3) XYZ coordinates
+        saliency: (N,) or (T, N) saliency scores
+        aux_features: (N, K) or (T, N, K) auxiliary features [doppler, snr, density, ...]
+        title: Plot title
+        save_path: Path to save figure
+    """
+    # Flatten temporal dimension if present
+    if points.ndim == 3:
+        points = points.reshape(-1, 3)
+        saliency = saliency.flatten()
+        if aux_features.ndim == 3:
+            aux_features = aux_features.reshape(-1, aux_features.shape[-1])
+
+    # Extract auxiliary features
+    if aux_features.shape[1] >= 3:
+        doppler = aux_features[:, 0]
+        snr = aux_features[:, 1]
+        density = aux_features[:, 2]
+        feature_names = ['Doppler Velocity', 'SNR', 'Density']
+        features = [doppler, snr, density]
+    elif aux_features.shape[1] == 1:
+        doppler = aux_features[:, 0]
+        feature_names = ['Doppler Velocity']
+        features = [doppler]
+    else:
+        logging.warning("Unexpected auxiliary feature dimension")
+        return
+
+    num_features = len(features)
+    fig, axes = plt.subplots(2, num_features, figsize=(6 * num_features, 10))
+    if num_features == 1:
+        axes = axes.reshape(-1, 1)
+
+    for i, (feature, feat_name) in enumerate(zip(features, feature_names)):
+        # Remove NaN/Inf values for correlation
+        valid_mask = ~(np.isnan(feature) | np.isinf(feature) | np.isnan(saliency) | np.isinf(saliency))
+        feat_valid = feature[valid_mask]
+        sal_valid = saliency[valid_mask]
+
+        if len(feat_valid) < 2:
+            continue
+
+        # Top row: Scatter plot
+        axes[0, i].scatter(feat_valid, sal_valid, alpha=0.5, s=10, c=sal_valid, cmap='hot')
+        axes[0, i].set_xlabel(feat_name)
+        axes[0, i].set_ylabel('Saliency Score')
+        axes[0, i].set_title(f'{feat_name} vs Saliency')
+
+        # Add trend line
+        z = np.polyfit(feat_valid, sal_valid, 1)
+        p = np.poly1d(z)
+        x_trend = np.linspace(feat_valid.min(), feat_valid.max(), 100)
+        axes[0, i].plot(x_trend, p(x_trend), "r--", linewidth=2, label=f'y={z[0]:.3f}x+{z[1]:.3f}')
+        axes[0, i].legend()
+
+        # Compute correlations
+        try:
+            pearson_r, pearson_p = pearsonr(feat_valid, sal_valid)
+            spearman_r, spearman_p = spearmanr(feat_valid, sal_valid)
+            corr_text = f'Pearson: r={pearson_r:.3f}, p={pearson_p:.4f}\nSpearman: ρ={spearman_r:.3f}, p={spearman_p:.4f}'
+            axes[0, i].text(0.05, 0.95, corr_text, transform=axes[0, i].transAxes,
+                          verticalalignment='top', bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.8))
+        except:
+            pass
+
+        # Bottom row: 2D histogram (heatmap)
+        h, xedges, yedges = np.histogram2d(feat_valid, sal_valid, bins=30)
+        h = h.T  # Transpose for correct orientation
+        im = axes[1, i].imshow(h, origin='lower', aspect='auto', cmap='YlOrRd',
+                              extent=[xedges[0], xedges[-1], yedges[0], yedges[-1]])
+        axes[1, i].set_xlabel(feat_name)
+        axes[1, i].set_ylabel('Saliency Score')
+        axes[1, i].set_title(f'Density Heatmap: {feat_name} vs Saliency')
+        plt.colorbar(im, ax=axes[1, i], label='Count')
+
+    fig.suptitle(title, fontsize=16)
+    plt.tight_layout()
+
+    if save_path:
+        plt.savefig(save_path, dpi=150, bbox_inches='tight')
+        plt.close()
+    else:
+        plt.show()
+
+
+def visualize_tsne_risk_categorization(embeddings, labels, predictions, risk_map, class_names=None,
+                                        title="t-SNE: Risk-Based Categorization", save_path=None):
+    """
+    Visualize t-SNE embeddings colored by risk categories.
+
+    Args:
+        embeddings: (N, D) feature embeddings
+        labels: (N,) true labels
+        predictions: (N,) predicted labels
+        risk_map: dict mapping class labels to risk levels (0, 1, 2, 3)
+        class_names: List of class names
+        title: Plot title
+        save_path: Path to save figure
+    """
+    logging.info("Computing t-SNE (this may take a few minutes)...")
+
+    # Apply t-SNE
+    tsne = TSNE(n_components=2, random_state=42, perplexity=min(30, len(embeddings) - 1))
+    embeddings_2d = tsne.fit_transform(embeddings)
+
+    # Map labels to risk categories
+    risk_labels = np.array([risk_map.get(int(label), -1) for label in labels])
+    risk_preds = np.array([risk_map.get(int(pred), -1) for pred in predictions])
+
+    # Determine correct/incorrect predictions
+    correct_mask = labels == predictions
+
+    # Create figure with 2 subplots
+    fig, axes = plt.subplots(1, 2, figsize=(20, 8))
+
+    # Define risk colors
+    risk_colors = {0: '#1f77b4', 1: '#2ca02c', 2: '#ff7f0e', 3: '#d62728'}  # Blue, Green, Orange, Red
+    risk_labels_names = {0: 'Risk 0 (Start-Walking)', 1: 'Risk 1 (Low)', 2: 'Risk 2 (Medium)', 3: 'Risk 3 (High)'}
+
+    # Left plot: True risk categories
+    for risk_level in sorted(risk_colors.keys()):
+        mask = risk_labels == risk_level
+        if np.any(mask):
+            axes[0].scatter(embeddings_2d[mask, 0], embeddings_2d[mask, 1],
+                          c=risk_colors[risk_level], label=risk_labels_names[risk_level],
+                          alpha=0.6, s=50, edgecolors='black', linewidths=0.5)
+
+    axes[0].set_xlabel('t-SNE Dimension 1', fontsize=12)
+    axes[0].set_ylabel('t-SNE Dimension 2', fontsize=12)
+    axes[0].set_title('True Risk Categories', fontsize=14)
+    axes[0].legend(loc='best', fontsize=10)
+    axes[0].grid(alpha=0.3)
+
+    # Right plot: Correct vs Incorrect predictions
+    # Correct predictions
+    axes[1].scatter(embeddings_2d[correct_mask, 0], embeddings_2d[correct_mask, 1],
+                   c=[risk_colors[r] for r in risk_labels[correct_mask]],
+                   marker='o', alpha=0.6, s=50, edgecolors='black', linewidths=0.5, label='Correct')
+
+    # Incorrect predictions
+    axes[1].scatter(embeddings_2d[~correct_mask, 0], embeddings_2d[~correct_mask, 1],
+                   c=[risk_colors[r] for r in risk_labels[~correct_mask]],
+                   marker='X', alpha=0.8, s=100, edgecolors='red', linewidths=2, label='Incorrect')
+
+    axes[1].set_xlabel('t-SNE Dimension 1', fontsize=12)
+    axes[1].set_ylabel('t-SNE Dimension 2', fontsize=12)
+    axes[1].set_title('Correct vs Incorrect Predictions', fontsize=14)
+    axes[1].legend(loc='best', fontsize=10)
+    axes[1].grid(alpha=0.3)
+
+    fig.suptitle(title, fontsize=16)
+    plt.tight_layout()
+
+    if save_path:
+        plt.savefig(save_path, dpi=150, bbox_inches='tight')
+        plt.close()
+    else:
+        plt.show()
+
+    logging.info("✓ t-SNE visualization complete")
+
+    # Additional analysis: Confusion between risk categories
+    fig2, ax = plt.subplots(figsize=(8, 6))
+
+    # Create confusion matrix for risk categories
+    from sklearn.metrics import confusion_matrix
+    risk_cm = confusion_matrix(risk_labels, risk_preds, labels=[0, 1, 2, 3])
+
+    sns.heatmap(risk_cm, annot=True, fmt='d', cmap='Blues', ax=ax,
+                xticklabels=['Risk 0', 'Risk 1', 'Risk 2', 'Risk 3'],
+                yticklabels=['Risk 0', 'Risk 1', 'Risk 2', 'Risk 3'])
+    ax.set_xlabel('Predicted Risk Category')
+    ax.set_ylabel('True Risk Category')
+    ax.set_title('Confusion Matrix: Risk-Based Categories')
+
+    plt.tight_layout()
+
+    if save_path:
+        risk_cm_path = save_path.replace('.png', '_risk_confusion.png')
+        plt.savefig(risk_cm_path, dpi=150, bbox_inches='tight')
         plt.close()
     else:
         plt.show()
@@ -581,11 +860,66 @@ def run_explainability_analysis(model, test_loader, class_names, output_dir,
     logging.info(f"✓ Found {len(fn_indices)} False Negatives")
     logging.info(f"Accuracy: {len(tp_indices) / len(all_labels) * 100:.2f}%")
 
-    # Sample indices
+    # Sample indices - Use deterministic sampling for fair model comparison
     logging.info(f"\nSampling {num_samples} True Positives and {num_samples} False Negatives...")
-    tp_sample_idx = tp_indices[torch.randperm(len(tp_indices))[:num_samples]].tolist()
-    fn_sample_idx = fn_indices[torch.randperm(len(fn_indices))[:num_samples]].tolist()
-    logging.info(f"✓ Sampled {len(tp_sample_idx)} TP and {len(fn_sample_idx)} FN")
+    logging.info("Using deterministic sampling (fixed seed=42) for reproducibility across models")
+
+    # Set seed for reproducibility
+    torch.manual_seed(42)
+    np.random.seed(42)
+
+    # Sample with fixed seed - this ensures same samples are selected across different models
+    tp_sample_idx = tp_indices[torch.randperm(len(tp_indices), generator=torch.Generator().manual_seed(42))[:num_samples]].tolist()
+    fn_sample_idx = fn_indices[torch.randperm(len(fn_indices), generator=torch.Generator().manual_seed(42))[:num_samples]].tolist()
+
+    logging.info(f"✓ Sampled {len(tp_sample_idx)} TP and {len(fn_sample_idx)} FN (deterministic)")
+    logging.info(f"  TP sample indices: {tp_sample_idx}")
+    logging.info(f"  FN sample indices: {fn_sample_idx}")
+
+    # ========== NEW: t-SNE Risk-Based Categorization Visualization ==========
+    logging.info("\n" + "-"*70)
+    logging.info("STEP 2.5: Generating t-SNE Risk-Based Categorization")
+    logging.info("-"*70)
+
+    # Define risk mapping (from wrapper.py)
+    risk_map = {
+        0: 1, 1: 3, 2: 1, 3: 1, 4: 1, 5: 2, 6: 2, 7: 2,
+        8: 1, 9: 1, 10: 1, 11: 1, 12: 1, 13: 1, 14: 3, 15: 1,
+        16: 3, 17: 1, 18: 1, 19: 3, 20: 1, 21: 2, 22: 1, 23: 3,
+        24: 2, 25: 2, 26: 2, 27: 2, 28: 2, 29: 0
+    }
+
+    try:
+        # Extract embeddings for all samples
+        logging.info("Extracting feature embeddings from all test samples...")
+        all_embeddings = []
+        batch_size = 32  # Process in batches to avoid memory issues
+        for i in tqdm(range(0, len(all_data), batch_size), desc="Extracting embeddings"):
+            batch = all_data[i:i+batch_size].to(device)
+            emb = explainer.extract_embeddings(batch)
+            all_embeddings.append(emb)
+
+        all_embeddings = np.concatenate(all_embeddings, axis=0)
+        logging.info(f"✓ Extracted embeddings with shape: {all_embeddings.shape}")
+
+        # Generate t-SNE visualization
+        visualize_tsne_risk_categorization(
+            embeddings=all_embeddings,
+            labels=all_labels.numpy(),
+            predictions=all_preds.numpy(),
+            risk_map=risk_map,
+            class_names=class_names,
+            title="t-SNE: Risk-Based Categorization (All Test Samples)",
+            save_path=os.path.join(output_dir, 'tsne_risk_categorization.png')
+        )
+        logging.info("✓ t-SNE visualization saved")
+
+    except Exception as e:
+        logging.error(f"✗ t-SNE visualization failed: {e}")
+        import traceback
+        logging.error(traceback.format_exc())
+
+    # ========================================================================
 
     # Process True Positives
     logging.info("\n" + "-"*70)
@@ -640,6 +974,40 @@ def run_explainability_analysis(model, test_loader, class_names, output_dir,
                     title=f"TP: {class_name} - Temporal Importance\n{info_str}",
                     save_path=os.path.join(output_dir, 'true_positives', f'tp_{i}_temporal_subj{subject_id}_scen{scenario_id}_{class_name}.png')
                 )
+
+        # ========== NEW: Doppler-Saliency Correlation Visualization ==========
+        # Extract auxiliary features if available
+        if x.dim() == 4:  # Temporal: (1, T, N, C)
+            if x.shape[-1] >= 7:  # Has [x, y, z, zone, doppler, snr, density]
+                aux_features = x[0, :, :, 4:7].detach().cpu().numpy()  # (T, N, 3)
+                visualize_doppler_saliency_correlation(
+                    points, sal, aux_features,
+                    title=f"TP: {class_name} - Doppler-Saliency Correlation\n{info_str}",
+                    save_path=os.path.join(output_dir, 'true_positives', f'tp_{i}_doppler_corr_subj{subject_id}_scen{scenario_id}_{class_name}.png')
+                )
+            elif x.shape[-1] >= 5:  # Has [x, y, z, zone, doppler]
+                aux_features = x[0, :, :, 4:5].detach().cpu().numpy()  # (T, N, 1)
+                visualize_doppler_saliency_correlation(
+                    points, sal, aux_features,
+                    title=f"TP: {class_name} - Doppler-Saliency Correlation\n{info_str}",
+                    save_path=os.path.join(output_dir, 'true_positives', f'tp_{i}_doppler_corr_subj{subject_id}_scen{scenario_id}_{class_name}.png')
+                )
+        elif x.dim() == 3:  # Non-temporal: (1, N, C)
+            if x.shape[-1] >= 7:  # Has [x, y, z, zone, doppler, snr, density]
+                aux_features = x[0, :, 4:7].detach().cpu().numpy()  # (N, 3)
+                visualize_doppler_saliency_correlation(
+                    points, sal, aux_features,
+                    title=f"TP: {class_name} - Doppler-Saliency Correlation\n{info_str}",
+                    save_path=os.path.join(output_dir, 'true_positives', f'tp_{i}_doppler_corr_subj{subject_id}_scen{scenario_id}_{class_name}.png')
+                )
+            elif x.shape[-1] >= 5:  # Has [x, y, z, zone, doppler]
+                aux_features = x[0, :, 4:5].detach().cpu().numpy()  # (N, 1)
+                visualize_doppler_saliency_correlation(
+                    points, sal, aux_features,
+                    title=f"TP: {class_name} - Doppler-Saliency Correlation\n{info_str}",
+                    save_path=os.path.join(output_dir, 'true_positives', f'tp_{i}_doppler_corr_subj{subject_id}_scen{scenario_id}_{class_name}.png')
+                )
+        # ====================================================================
 
     # Process False Negatives
     logging.info("\n" + "-"*70)
@@ -731,6 +1099,76 @@ def run_explainability_analysis(model, test_loader, class_names, output_dir,
                     title=f"FN: True={true_class_name}, Pred={pred_class_name} - Temporal\n{info_str}",
                     save_path=os.path.join(output_dir, 'false_negatives', f'fn_{i}_temporal_subj{subject_id}_scen{scenario_id}.png')
                 )
+
+        # ========== NEW: Doppler-Saliency Correlation for False Negatives ==========
+        # Extract auxiliary features and create comparison visualizations for both true and pred saliency
+        if x.dim() == 4:  # Temporal: (1, T, N, C)
+            if x.shape[-1] >= 7:  # Has [x, y, z, zone, doppler, snr, density]
+                aux_features = x[0, :, :, 4:7].detach().cpu().numpy()  # (T, N, 3)
+
+                # Doppler correlation with TRUE class saliency
+                visualize_doppler_saliency_correlation(
+                    points, sal_true, aux_features,
+                    title=f"FN: True={true_class_name} - Doppler-Saliency Correlation (True Class)\n{info_str}",
+                    save_path=os.path.join(output_dir, 'false_negatives', f'fn_{i}_doppler_corr_true_subj{subject_id}_scen{scenario_id}_{true_class_name}.png')
+                )
+
+                # Doppler correlation with PREDICTED class saliency
+                visualize_doppler_saliency_correlation(
+                    points, sal_pred, aux_features,
+                    title=f"FN: Pred={pred_class_name} - Doppler-Saliency Correlation (Pred Class)\n{info_str}",
+                    save_path=os.path.join(output_dir, 'false_negatives', f'fn_{i}_doppler_corr_pred_subj{subject_id}_scen{scenario_id}_{pred_class_name}.png')
+                )
+            elif x.shape[-1] >= 5:  # Has [x, y, z, zone, doppler]
+                aux_features = x[0, :, :, 4:5].detach().cpu().numpy()  # (T, N, 1)
+
+                # Doppler correlation with TRUE class saliency
+                visualize_doppler_saliency_correlation(
+                    points, sal_true, aux_features,
+                    title=f"FN: True={true_class_name} - Doppler-Saliency Correlation (True Class)\n{info_str}",
+                    save_path=os.path.join(output_dir, 'false_negatives', f'fn_{i}_doppler_corr_true_subj{subject_id}_scen{scenario_id}_{true_class_name}.png')
+                )
+
+                # Doppler correlation with PREDICTED class saliency
+                visualize_doppler_saliency_correlation(
+                    points, sal_pred, aux_features,
+                    title=f"FN: Pred={pred_class_name} - Doppler-Saliency Correlation (Pred Class)\n{info_str}",
+                    save_path=os.path.join(output_dir, 'false_negatives', f'fn_{i}_doppler_corr_pred_subj{subject_id}_scen{scenario_id}_{pred_class_name}.png')
+                )
+        elif x.dim() == 3:  # Non-temporal: (1, N, C)
+            if x.shape[-1] >= 7:  # Has [x, y, z, zone, doppler, snr, density]
+                aux_features = x[0, :, 4:7].detach().cpu().numpy()  # (N, 3)
+
+                # Doppler correlation with TRUE class saliency
+                visualize_doppler_saliency_correlation(
+                    points, sal_true, aux_features,
+                    title=f"FN: True={true_class_name} - Doppler-Saliency Correlation (True Class)\n{info_str}",
+                    save_path=os.path.join(output_dir, 'false_negatives', f'fn_{i}_doppler_corr_true_subj{subject_id}_scen{scenario_id}_{true_class_name}.png')
+                )
+
+                # Doppler correlation with PREDICTED class saliency
+                visualize_doppler_saliency_correlation(
+                    points, sal_pred, aux_features,
+                    title=f"FN: Pred={pred_class_name} - Doppler-Saliency Correlation (Pred Class)\n{info_str}",
+                    save_path=os.path.join(output_dir, 'false_negatives', f'fn_{i}_doppler_corr_pred_subj{subject_id}_scen{scenario_id}_{pred_class_name}.png')
+                )
+            elif x.shape[-1] >= 5:  # Has [x, y, z, zone, doppler]
+                aux_features = x[0, :, 4:5].detach().cpu().numpy()  # (N, 1)
+
+                # Doppler correlation with TRUE class saliency
+                visualize_doppler_saliency_correlation(
+                    points, sal_true, aux_features,
+                    title=f"FN: True={true_class_name} - Doppler-Saliency Correlation (True Class)\n{info_str}",
+                    save_path=os.path.join(output_dir, 'false_negatives', f'fn_{i}_doppler_corr_true_subj{subject_id}_scen{scenario_id}_{true_class_name}.png')
+                )
+
+                # Doppler correlation with PREDICTED class saliency
+                visualize_doppler_saliency_correlation(
+                    points, sal_pred, aux_features,
+                    title=f"FN: Pred={pred_class_name} - Doppler-Saliency Correlation (Pred Class)\n{info_str}",
+                    save_path=os.path.join(output_dir, 'false_negatives', f'fn_{i}_doppler_corr_pred_subj{subject_id}_scen{scenario_id}_{pred_class_name}.png')
+                )
+        # ============================================================================
 
     # Generate summary statistics
     logging.info("Generating summary statistics...")

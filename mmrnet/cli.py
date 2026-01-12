@@ -368,10 +368,15 @@ class Main:
         logging.info("="*70)
 
         # Check if explainability is requested for unsupported model
-        supported_explainability_models = ['dgcnn_aux_fusion_t', 'dgcnnauxfusiont']
+        supported_explainability_models = [
+            'dgcnn', 'dgcnn_aux', 'dgcnnaux',
+            'dgcnn_aux_fusion_t', 'dgcnnauxfusiont',
+            'dgcnn_aux_fusion_stattn', 'dgcnnauxfusionstattn',
+            'attdgcnn'
+        ]
         if a.explainability and a.model.lower() not in supported_explainability_models:
             logging.warning("="*70)
-            logging.warning(f"Explainability is only supported for DGCNN-AFTNet (dgcnn_aux_fusion_t). "
+            logging.warning(f"Explainability is only supported for DGCNN-based models. "
                           f"Model '{a.model}' does not support explainability. Disabling explainability.")
             logging.warning("="*70)
             a.explainability = False

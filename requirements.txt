@@ -22,6 +22,8 @@ deepspeed
 fvcore
 mamba-ssm>=1.2.0
 causal-conv1d>=1.2.0
+scipy
+seaborn
 
 # for docs
 mkdocs-material
