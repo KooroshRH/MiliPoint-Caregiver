@@ -630,12 +630,21 @@ def visualize_doppler_saliency_correlation(points, saliency, aux_features, title
         axes[0, i].set_ylabel('Saliency Score')
         axes[0, i].set_title(f'{feat_name} vs Saliency')
 
-        # Add trend line
-        z = np.polyfit(feat_valid, sal_valid, 1)
-        p = np.poly1d(z)
-        x_trend = np.linspace(feat_valid.min(), feat_valid.max(), 100)
-        axes[0, i].plot(x_trend, p(x_trend), "r--", linewidth=2, label=f'y={z[0]:.3f}x+{z[1]:.3f}')
-        axes[0, i].legend(loc='best', fontsize=8, framealpha=0.9)
+        # Add trend line (with error handling for numerical issues)
+        try:
+            # Check if data has sufficient variance for fitting
+            if np.std(feat_valid) > 1e-10 and np.std(sal_valid) > 1e-10:
+                z = np.polyfit(feat_valid, sal_valid, 1)
+                p = np.poly1d(z)
+                x_trend = np.linspace(feat_valid.min(), feat_valid.max(), 100)
+                axes[0, i].plot(x_trend, p(x_trend), "r--", linewidth=2, label=f'y={z[0]:.3f}x+{z[1]:.3f}')
+                axes[0, i].legend(loc='best', fontsize=8, framealpha=0.9)
+            else:
+                logging.warning(f"Insufficient variance in {feat_name} or saliency for trend line fitting")
+        except np.linalg.LinAlgError as e:
+            logging.warning(f"Could not fit trend line for {feat_name}: {e}")
+        except Exception as e:
+            logging.warning(f"Unexpected error fitting trend line for {feat_name}: {e}")
 
         # Compute correlations
         try:
@@ -644,8 +653,8 @@ def visualize_doppler_saliency_correlation(points, saliency, aux_features, title
             corr_text = f'Pearson: r={pearson_r:.3f}, p={pearson_p:.4f}\nSpearman: ρ={spearman_r:.3f}, p={spearman_p:.4f}'
             axes[0, i].text(0.05, 0.95, corr_text, transform=axes[0, i].transAxes,
                           verticalalignment='top', bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.8))
-        except:
-            pass
+        except Exception as e:
+            logging.warning(f"Could not compute correlations for {feat_name}: {e}")
 
         # Bottom row: 2D histogram (heatmap)
         h, xedges, yedges = np.histogram2d(feat_valid, sal_valid, bins=30)
