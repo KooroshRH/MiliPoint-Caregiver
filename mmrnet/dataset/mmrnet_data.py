@@ -1238,17 +1238,17 @@ class MMRActionData(Dataset):
             x = x.reshape(T * N, C)
             # Apply normalization to concatenated format (always, for all partitions)
             x = self._normalize_stack_by_centroid(x)
-        else:
-            # For temporal format during TEST: apply per-frame normalization for consistent visualization
-            # During TRAIN/VAL: keep original behavior (no normalization) to preserve trained model performance
-            if self.partition == 'test':
-                x_normalized = []
-                for t in range(T):
-                    frame = x[t]  # (N, C)
-                    frame_normalized = self._normalize_stack_by_centroid(frame)
-                    x_normalized.append(frame_normalized)
-                x = np.stack(x_normalized, axis=0)  # (T, N, C)
-            # else: keep x as-is for train/val (original behavior)
+        # else:
+        #     # For temporal format during TEST: apply per-frame normalization for consistent visualization
+        #     # During TRAIN/VAL: keep original behavior (no normalization) to preserve trained model performance
+        #     if self.partition == 'test':
+        #         x_normalized = []
+        #         for t in range(T):
+        #             frame = x[t]  # (N, C)
+        #             frame_normalized = self._normalize_stack_by_centroid(frame)
+        #             x_normalized.append(frame_normalized)
+        #         x = np.stack(x_normalized, axis=0)  # (T, N, C)
+        #     # else: keep x as-is for train/val (original behavior)
 
         x = torch.tensor(x, dtype=torch.float32)
         y = torch.tensor(data_point['y'], dtype=self.target_dtype)
