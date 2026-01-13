@@ -405,7 +405,7 @@ def visualize_point_saliency_3d(points, saliency, title="Point Saliency", save_p
     # Add radar position marker
     ax.scatter([0], [0], [radar_height], c='red', marker='^', s=200,
               label=f'Radar Position (0, 0, {radar_height}m)', edgecolors='black', linewidths=2)
-    ax.legend(loc='upper right')
+    ax.legend(loc='upper left', fontsize=9, framealpha=0.9)
 
     plt.colorbar(scatter, ax=ax, label='Saliency Score')
 
@@ -472,13 +472,13 @@ def visualize_point_saliency_2d(points, saliency, title="Point Saliency", save_p
         if 'X' in xlabel and 'Y' in ylabel:  # XY projection
             ax.scatter([0], [0], c='red', marker='^', s=100, edgecolors='black',
                       linewidths=1.5, label='Radar', zorder=10)
-            ax.legend(loc='upper right', fontsize=8)
+            ax.legend(loc='upper left', fontsize=8, framealpha=0.9)
         elif 'X' in xlabel and 'Z' in ylabel:  # XZ projection
             ax.axhline(y=radar_height, color='red', linestyle='--', linewidth=1, alpha=0.7, label='Radar Height')
-            ax.legend(loc='upper right', fontsize=8)
+            ax.legend(loc='upper left', fontsize=8, framealpha=0.9)
         elif 'Y' in xlabel and 'Z' in ylabel:  # YZ projection
             ax.axhline(y=radar_height, color='red', linestyle='--', linewidth=1, alpha=0.7, label='Radar Height')
-            ax.legend(loc='upper right', fontsize=8)
+            ax.legend(loc='upper left', fontsize=8, framealpha=0.9)
 
     fig.suptitle(title, fontsize=14)
     plt.tight_layout()
@@ -555,7 +555,7 @@ def visualize_film_modulation(gamma, beta, aux_names=None, title="FiLM Modulatio
     axes[0].set_xlabel('Feature Dimension')
     axes[0].set_ylabel('Gamma (Scale)')
     axes[0].set_title('FiLM Gamma Values')
-    axes[0].legend()
+    axes[0].legend(loc='upper right', fontsize=8, framealpha=0.9)
 
     # Beta plot
     axes[1].bar(x, beta_mean, color='steelblue', alpha=0.8)
@@ -565,7 +565,7 @@ def visualize_film_modulation(gamma, beta, aux_names=None, title="FiLM Modulatio
     axes[1].set_xlabel('Feature Dimension')
     axes[1].set_ylabel('Beta (Shift)')
     axes[1].set_title('FiLM Beta Values')
-    axes[1].legend()
+    axes[1].legend(loc='upper right', fontsize=8, framealpha=0.9)
 
     fig.suptitle(title, fontsize=14)
     plt.tight_layout()
@@ -635,7 +635,7 @@ def visualize_doppler_saliency_correlation(points, saliency, aux_features, title
         p = np.poly1d(z)
         x_trend = np.linspace(feat_valid.min(), feat_valid.max(), 100)
         axes[0, i].plot(x_trend, p(x_trend), "r--", linewidth=2, label=f'y={z[0]:.3f}x+{z[1]:.3f}')
-        axes[0, i].legend()
+        axes[0, i].legend(loc='best', fontsize=8, framealpha=0.9)
 
         # Compute correlations
         try:
@@ -699,7 +699,7 @@ def visualize_tsne_risk_categorization(embeddings, labels, predictions, risk_map
 
     # Define risk colors
     risk_colors = {0: '#1f77b4', 1: '#2ca02c', 2: '#ff7f0e', 3: '#d62728'}  # Blue, Green, Orange, Red
-    risk_labels_names = {0: 'Risk 0 (Start-Walking)', 1: 'Risk 1 (Low)', 2: 'Risk 2 (Medium)', 3: 'Risk 3 (High)'}
+    risk_labels_names = {0: 'L1', 1: 'L2', 2: 'L3', 3: 'L4'}
 
     # Left plot: True risk categories
     for risk_level in sorted(risk_colors.keys()):
@@ -712,7 +712,7 @@ def visualize_tsne_risk_categorization(embeddings, labels, predictions, risk_map
     axes[0].set_xlabel('t-SNE Dimension 1', fontsize=12)
     axes[0].set_ylabel('t-SNE Dimension 2', fontsize=12)
     axes[0].set_title('True Risk Categories', fontsize=14)
-    axes[0].legend(loc='best', fontsize=10)
+    axes[0].legend(loc='upper left', bbox_to_anchor=(1.02, 1), fontsize=10, framealpha=0.9)
     axes[0].grid(alpha=0.3)
 
     # Right plot: Correct vs Incorrect predictions
@@ -729,7 +729,7 @@ def visualize_tsne_risk_categorization(embeddings, labels, predictions, risk_map
     axes[1].set_xlabel('t-SNE Dimension 1', fontsize=12)
     axes[1].set_ylabel('t-SNE Dimension 2', fontsize=12)
     axes[1].set_title('Correct vs Incorrect Predictions', fontsize=14)
-    axes[1].legend(loc='best', fontsize=10)
+    axes[1].legend(loc='upper left', bbox_to_anchor=(1.02, 1), fontsize=10, framealpha=0.9)
     axes[1].grid(alpha=0.3)
 
     fig.suptitle(title, fontsize=16)
@@ -751,8 +751,8 @@ def visualize_tsne_risk_categorization(embeddings, labels, predictions, risk_map
     risk_cm = confusion_matrix(risk_labels, risk_preds, labels=[0, 1, 2, 3])
 
     sns.heatmap(risk_cm, annot=True, fmt='d', cmap='Blues', ax=ax,
-                xticklabels=['Risk 0', 'Risk 1', 'Risk 2', 'Risk 3'],
-                yticklabels=['Risk 0', 'Risk 1', 'Risk 2', 'Risk 3'])
+                xticklabels=['L1', 'L2', 'L3', 'L4'],
+                yticklabels=['L1', 'L2', 'L3', 'L4'])
     ax.set_xlabel('Predicted Risk Category')
     ax.set_ylabel('True Risk Category')
     ax.set_title('Confusion Matrix: Risk-Based Categories')
