@@ -849,7 +849,7 @@ def run_explainability_analysis(model, test_loader, class_names, output_dir,
     logging.info(f"Total samples: {len(all_data)}")
     logging.info(f"Data shape: {all_data.shape}")
 
-    # Identify True Positives and False Negatives
+    # Identify True Positives and False Negatives for this model
     logging.info("\n" + "-"*70)
     logging.info("STEP 2: Identifying True Positives and False Negatives")
     logging.info("-"*70)
@@ -861,21 +861,30 @@ def run_explainability_analysis(model, test_loader, class_names, output_dir,
     logging.info(f"✓ Found {len(fn_indices)} False Negatives")
     logging.info(f"Accuracy: {len(tp_indices) / len(all_labels) * 100:.2f}%")
 
-    # Sample indices - Use deterministic sampling for fair model comparison
-    logging.info(f"\nSampling {num_samples} True Positives and {num_samples} False Negatives...")
-    logging.info("Using deterministic sampling (fixed seed=42) for reproducibility across models")
+    # Fixed sample selection - SAME SAMPLES FOR ALL MODELS regardless of TP/FN status
+    logging.info(f"\nSelecting {num_samples * 2} fixed samples for fair cross-model comparison...")
+    logging.info("NOTE: Using fixed sample indices (seed=42) - same samples for ALL models")
+    logging.info("Samples may be TP for one model and FN for another - this allows fair comparison!")
 
     # Set seed for reproducibility
     torch.manual_seed(42)
     np.random.seed(42)
 
-    # Sample with fixed seed - this ensures same samples are selected across different models
-    tp_sample_idx = tp_indices[torch.randperm(len(tp_indices), generator=torch.Generator().manual_seed(42))[:num_samples]].tolist()
-    fn_sample_idx = fn_indices[torch.randperm(len(fn_indices), generator=torch.Generator().manual_seed(42))[:num_samples]].tolist()
+    # Select fixed sample indices from the entire test set (not from TP/FN subsets)
+    # This ensures we analyze the SAME samples across different models
+    total_samples = len(all_labels)
+    fixed_sample_indices = torch.randperm(total_samples, generator=torch.Generator().manual_seed(42))[:num_samples * 2].tolist()
 
-    logging.info(f"✓ Sampled {len(tp_sample_idx)} TP and {len(fn_sample_idx)} FN (deterministic)")
-    logging.info(f"  TP sample indices: {tp_sample_idx}")
-    logging.info(f"  FN sample indices: {fn_sample_idx}")
+    logging.info(f"✓ Selected {len(fixed_sample_indices)} fixed samples (indices: {fixed_sample_indices})")
+
+    # For each model, these samples will be categorized as TP or FN based on that model's predictions
+    sample_idx_to_analyze = fixed_sample_indices
+
+    logging.info(f"\nFor this model:")
+    correct_in_selected = correct_mask[fixed_sample_indices].sum().item()
+    incorrect_in_selected = len(fixed_sample_indices) - correct_in_selected
+    logging.info(f"  - {correct_in_selected}/{len(fixed_sample_indices)} are True Positives")
+    logging.info(f"  - {incorrect_in_selected}/{len(fixed_sample_indices)} are False Negatives")
 
     # ========== NEW: t-SNE Risk-Based Categorization Visualization ==========
     logging.info("\n" + "-"*70)
@@ -922,254 +931,230 @@ def run_explainability_analysis(model, test_loader, class_names, output_dir,
 
     # ========================================================================
 
-    # Process True Positives
+    # Process all selected samples (will be labeled as TP or FN for this specific model)
     logging.info("\n" + "-"*70)
-    logging.info("STEP 3: Generating True Positive visualizations")
+    logging.info("STEP 3: Generating visualizations for selected samples")
     logging.info("-"*70)
-    for i, idx in enumerate(tqdm(tp_sample_idx, desc="True Positives")):
-        logging.info(f"Processing TP {i+1}/{len(tp_sample_idx)}: sample index {idx}")
-        x = all_data[idx:idx+1].to(device)  # Ensure data is on correct device
+    logging.info(f"Processing {len(sample_idx_to_analyze)} samples (same samples for all models)")
+
+    for i, idx in enumerate(tqdm(sample_idx_to_analyze, desc="Processing samples")):
+        logging.info(f"Processing sample {i+1}/{len(sample_idx_to_analyze)}: dataset index {idx}")
+        x = all_data[idx:idx+1].to(device)
         label = all_labels[idx].item()
         pred = all_preds[idx].item()
         metadata = all_metadata[idx]
 
-        # Compute saliency - create target_class tensor on correct device
-        saliency = explainer.compute_point_saliency(x, target_class=torch.tensor([pred], device=device))
+        # Determine if this is TP or FN for THIS model
+        is_correct = (label == pred)
+        output_subdir = 'true_positives' if is_correct else 'false_negatives'
 
-        # Get points (XYZ) - detach and move to CPU first
-        if x.dim() == 4:  # (1, T, N, C)
-            points = x[0, :, :, :3].detach().cpu().numpy()
-            sal = saliency[0]
-        else:  # (1, N, C)
-            points = x[0, :, :3].detach().cpu().numpy()
-            sal = saliency[0]
-
-        class_name = class_names[label] if class_names else str(label)
-        subject_id = metadata['subject_id']
-        scenario_id = metadata['scenario_id']
-        sample_idx_str = metadata['sample_idx']
-
-        # Create info string for titles
-        info_str = f"Subject: {subject_id}, Scenario: {scenario_id}"
-
-        # 3D visualization
-        visualize_point_saliency_3d(
-            points, sal,
-            title=f"TP: {class_name}\n{info_str}",
-            save_path=os.path.join(output_dir, 'true_positives', f'tp_{i}_3d_subj{subject_id}_scen{scenario_id}_{class_name}.png')
-        )
-
-        # 2D projections
-        visualize_point_saliency_2d(
-            points, sal,
-            title=f"TP: {class_name}\n{info_str}",
-            save_path=os.path.join(output_dir, 'true_positives', f'tp_{i}_2d_subj{subject_id}_scen{scenario_id}_{class_name}.png')
-        )
-
-        # Temporal importance if available
-        if x.dim() == 4:
-            temp_imp = explainer.extract_temporal_attention(x)
-            if temp_imp is not None:
-                visualize_temporal_importance(
-                    temp_imp[0],
-                    title=f"TP: {class_name} - Temporal Importance\n{info_str}",
-                    save_path=os.path.join(output_dir, 'true_positives', f'tp_{i}_temporal_subj{subject_id}_scen{scenario_id}_{class_name}.png')
-                )
-
-        # ========== NEW: Doppler-Saliency Correlation Visualization ==========
-        # Extract auxiliary features if available
-        if x.dim() == 4:  # Temporal: (1, T, N, C)
-            if x.shape[-1] >= 7:  # Has [x, y, z, zone, doppler, snr, density]
-                aux_features = x[0, :, :, 4:7].detach().cpu().numpy()  # (T, N, 3)
-                visualize_doppler_saliency_correlation(
-                    points, sal, aux_features,
-                    title=f"TP: {class_name} - Doppler-Saliency Correlation\n{info_str}",
-                    save_path=os.path.join(output_dir, 'true_positives', f'tp_{i}_doppler_corr_subj{subject_id}_scen{scenario_id}_{class_name}.png')
-                )
-            elif x.shape[-1] >= 5:  # Has [x, y, z, zone, doppler]
-                aux_features = x[0, :, :, 4:5].detach().cpu().numpy()  # (T, N, 1)
-                visualize_doppler_saliency_correlation(
-                    points, sal, aux_features,
-                    title=f"TP: {class_name} - Doppler-Saliency Correlation\n{info_str}",
-                    save_path=os.path.join(output_dir, 'true_positives', f'tp_{i}_doppler_corr_subj{subject_id}_scen{scenario_id}_{class_name}.png')
-                )
-        elif x.dim() == 3:  # Non-temporal: (1, N, C)
-            if x.shape[-1] >= 7:  # Has [x, y, z, zone, doppler, snr, density]
-                aux_features = x[0, :, 4:7].detach().cpu().numpy()  # (N, 3)
-                visualize_doppler_saliency_correlation(
-                    points, sal, aux_features,
-                    title=f"TP: {class_name} - Doppler-Saliency Correlation\n{info_str}",
-                    save_path=os.path.join(output_dir, 'true_positives', f'tp_{i}_doppler_corr_subj{subject_id}_scen{scenario_id}_{class_name}.png')
-                )
-            elif x.shape[-1] >= 5:  # Has [x, y, z, zone, doppler]
-                aux_features = x[0, :, 4:5].detach().cpu().numpy()  # (N, 1)
-                visualize_doppler_saliency_correlation(
-                    points, sal, aux_features,
-                    title=f"TP: {class_name} - Doppler-Saliency Correlation\n{info_str}",
-                    save_path=os.path.join(output_dir, 'true_positives', f'tp_{i}_doppler_corr_subj{subject_id}_scen{scenario_id}_{class_name}.png')
-                )
-        # ====================================================================
-
-    # Process False Negatives
-    logging.info("\n" + "-"*70)
-    logging.info("STEP 4: Generating False Negative visualizations")
-    logging.info("-"*70)
-    for i, idx in enumerate(tqdm(fn_sample_idx, desc="False Negatives")):
-        logging.info(f"Processing FN {i+1}/{len(fn_sample_idx)}: sample index {idx}")
-        x = all_data[idx:idx+1].to(device)  # Ensure data is on correct device
-        label = all_labels[idx].item()
-        pred = all_preds[idx].item()
-        metadata = all_metadata[idx]
-
-        # Compute saliency for both true and predicted class - create tensors on correct device
-        saliency_true = explainer.compute_point_saliency(x, target_class=torch.tensor([label], device=device))
-        saliency_pred = explainer.compute_point_saliency(x, target_class=torch.tensor([pred], device=device))
-
-        # Get points - detach and move to CPU first
-        if x.dim() == 4:
-            points = x[0, :, :, :3].detach().cpu().numpy()
-            sal_true = saliency_true[0]
-            sal_pred = saliency_pred[0]
-        else:
-            points = x[0, :, :3].detach().cpu().numpy()
-            sal_true = saliency_true[0]
-            sal_pred = saliency_pred[0]
-
+        # Get class names
         true_class_name = class_names[label] if class_names else str(label)
         pred_class_name = class_names[pred] if class_names else str(pred)
+
+        # Get metadata
         subject_id = metadata['subject_id']
         scenario_id = metadata['scenario_id']
 
         # Create info string for titles
-        info_str = f"Subject: {subject_id}, Scenario: {scenario_id}"
+        info_str = f"Subject: {subject_id}, Scenario: {scenario_id}, Sample: {idx}"
 
-        # Saliency for true class
-        visualize_point_saliency_3d(
-            points, sal_true,
-            title=f"FN: True={true_class_name}, Pred={pred_class_name}\n{info_str}\n(Saliency for True Class)",
-            save_path=os.path.join(output_dir, 'false_negatives', f'fn_{i}_3d_true_subj{subject_id}_scen{scenario_id}_{true_class_name}.png')
-        )
+        # Get points (XYZ)
+        if x.dim() == 4:  # (1, T, N, C)
+            points = x[0, :, :, :3].detach().cpu().numpy()
+        else:  # (1, N, C)
+            points = x[0, :, :3].detach().cpu().numpy()
 
-        # Saliency for predicted class
-        visualize_point_saliency_3d(
-            points, sal_pred,
-            title=f"FN: True={true_class_name}, Pred={pred_class_name}\n{info_str}\n(Saliency for Predicted Class)",
-            save_path=os.path.join(output_dir, 'false_negatives', f'fn_{i}_3d_pred_subj{subject_id}_scen{scenario_id}_{pred_class_name}.png')
-        )
+        if is_correct:
+            # ========== TRUE POSITIVE ==========
+            # Compute saliency for predicted (correct) class
+            saliency = explainer.compute_point_saliency(x, target_class=torch.tensor([pred], device=device))
+            sal = saliency[0]
 
-        # 2D comparison
-        fig, axes = plt.subplots(2, 3, figsize=(15, 10))
+            # 3D visualization
+            visualize_point_saliency_3d(
+                points, sal,
+                title=f"TP: {true_class_name}\n{info_str}",
+                save_path=os.path.join(output_dir, output_subdir, f'sample_{idx}_3d_subj{subject_id}_scen{scenario_id}_{true_class_name}.png')
+            )
 
-        if points.ndim == 3:
-            pts = points.reshape(-1, 3)
-            sal_t = sal_true.flatten()
-            sal_p = sal_pred.flatten()
+            # 2D projections
+            visualize_point_saliency_2d(
+                points, sal,
+                title=f"TP: {true_class_name}\n{info_str}",
+                save_path=os.path.join(output_dir, output_subdir, f'sample_{idx}_2d_subj{subject_id}_scen{scenario_id}_{true_class_name}.png')
+            )
+
+            # Temporal importance if available
+            if x.dim() == 4:
+                temp_imp = explainer.extract_temporal_attention(x)
+                if temp_imp is not None:
+                    visualize_temporal_importance(
+                        temp_imp[0],
+                        title=f"TP: {true_class_name} - Temporal Importance\n{info_str}",
+                        save_path=os.path.join(output_dir, output_subdir, f'sample_{idx}_temporal_subj{subject_id}_scen{scenario_id}_{true_class_name}.png')
+                    )
+
+            # Doppler-Saliency Correlation
+            if x.dim() == 4:  # Temporal
+                if x.shape[-1] >= 7:
+                    aux_features = x[0, :, :, 4:7].detach().cpu().numpy()
+                    visualize_doppler_saliency_correlation(
+                        points, sal, aux_features,
+                        title=f"TP: {true_class_name} - Doppler-Saliency Correlation\n{info_str}",
+                        save_path=os.path.join(output_dir, output_subdir, f'sample_{idx}_doppler_corr_subj{subject_id}_scen{scenario_id}_{true_class_name}.png')
+                    )
+                elif x.shape[-1] >= 5:
+                    aux_features = x[0, :, :, 4:5].detach().cpu().numpy()
+                    visualize_doppler_saliency_correlation(
+                        points, sal, aux_features,
+                        title=f"TP: {true_class_name} - Doppler-Saliency Correlation\n{info_str}",
+                        save_path=os.path.join(output_dir, output_subdir, f'sample_{idx}_doppler_corr_subj{subject_id}_scen{scenario_id}_{true_class_name}.png')
+                    )
+            elif x.dim() == 3:  # Non-temporal
+                if x.shape[-1] >= 7:
+                    aux_features = x[0, :, 4:7].detach().cpu().numpy()
+                    visualize_doppler_saliency_correlation(
+                        points, sal, aux_features,
+                        title=f"TP: {true_class_name} - Doppler-Saliency Correlation\n{info_str}",
+                        save_path=os.path.join(output_dir, output_subdir, f'sample_{idx}_doppler_corr_subj{subject_id}_scen{scenario_id}_{true_class_name}.png')
+                    )
+                elif x.shape[-1] >= 5:
+                    aux_features = x[0, :, 4:5].detach().cpu().numpy()
+                    visualize_doppler_saliency_correlation(
+                        points, sal, aux_features,
+                        title=f"TP: {true_class_name} - Doppler-Saliency Correlation\n{info_str}",
+                        save_path=os.path.join(output_dir, output_subdir, f'sample_{idx}_doppler_corr_subj{subject_id}_scen{scenario_id}_{true_class_name}.png')
+                    )
+
         else:
-            pts = points
-            sal_t = sal_true
-            sal_p = sal_pred
+            # ========== FALSE NEGATIVE ==========
+            # Compute saliency for both true and predicted class
+            saliency_true = explainer.compute_point_saliency(x, target_class=torch.tensor([label], device=device))
+            saliency_pred = explainer.compute_point_saliency(x, target_class=torch.tensor([pred], device=device))
+            sal_true = saliency_true[0]
+            sal_pred = saliency_pred[0]
 
-        projections = [(0, 1, 'X', 'Y'), (0, 2, 'X', 'Z'), (1, 2, 'Y', 'Z')]
+            # 3D visualizations - True class
+            visualize_point_saliency_3d(
+                points, sal_true,
+                title=f"FN: True={true_class_name}, Pred={pred_class_name}\n{info_str}\n(Saliency for True Class)",
+                save_path=os.path.join(output_dir, output_subdir, f'sample_{idx}_3d_true_subj{subject_id}_scen{scenario_id}_{true_class_name}.png')
+            )
 
-        for j, (xi, yi, xlabel, ylabel) in enumerate(projections):
-            # True class saliency
-            sc1 = axes[0, j].scatter(pts[:, xi], pts[:, yi], c=sal_t, cmap='hot', s=20, alpha=0.8)
-            axes[0, j].set_xlabel(xlabel)
-            axes[0, j].set_ylabel(ylabel)
-            axes[0, j].set_title(f'True: {true_class_name}')
-            plt.colorbar(sc1, ax=axes[0, j])
+            # 3D visualizations - Pred class
+            visualize_point_saliency_3d(
+                points, sal_pred,
+                title=f"FN: True={true_class_name}, Pred={pred_class_name}\n{info_str}\n(Saliency for Predicted Class)",
+                save_path=os.path.join(output_dir, output_subdir, f'sample_{idx}_3d_pred_subj{subject_id}_scen{scenario_id}_{pred_class_name}.png')
+            )
 
-            # Predicted class saliency
-            sc2 = axes[1, j].scatter(pts[:, xi], pts[:, yi], c=sal_p, cmap='hot', s=20, alpha=0.8)
-            axes[1, j].set_xlabel(xlabel)
-            axes[1, j].set_ylabel(ylabel)
-            axes[1, j].set_title(f'Pred: {pred_class_name}')
-            plt.colorbar(sc2, ax=axes[1, j])
+            # 2D comparison
+            fig, axes = plt.subplots(2, 3, figsize=(15, 10))
 
-        fig.suptitle(f'False Negative: True={true_class_name}, Predicted={pred_class_name}\n{info_str}', fontsize=14)
-        plt.tight_layout()
-        plt.savefig(os.path.join(output_dir, 'false_negatives', f'fn_{i}_comparison_subj{subject_id}_scen{scenario_id}.png'), dpi=150, bbox_inches='tight')
-        plt.close()
+            if points.ndim == 3:
+                pts = points.reshape(-1, 3).copy()
+                pts[:, 2] = pts[:, 2] + 2.20  # Apply radar height adjustment
+                sal_t = sal_true.flatten()
+                sal_p = sal_pred.flatten()
+            else:
+                pts = points.copy()
+                pts[:, 2] = pts[:, 2] + 2.20  # Apply radar height adjustment
+                sal_t = sal_true
+                sal_p = sal_pred
 
-        # Temporal importance
-        if x.dim() == 4:
-            temp_imp = explainer.extract_temporal_attention(x)
-            if temp_imp is not None:
-                visualize_temporal_importance(
-                    temp_imp[0],
-                    title=f"FN: True={true_class_name}, Pred={pred_class_name} - Temporal\n{info_str}",
-                    save_path=os.path.join(output_dir, 'false_negatives', f'fn_{i}_temporal_subj{subject_id}_scen{scenario_id}.png')
-                )
+            projections = [(0, 1, 'X (m)', 'Y (m)'), (0, 2, 'X (m)', 'Z (m)'), (1, 2, 'Y (m)', 'Z (m)')]
 
-        # ========== NEW: Doppler-Saliency Correlation for False Negatives ==========
-        # Extract auxiliary features and create comparison visualizations for both true and pred saliency
-        if x.dim() == 4:  # Temporal: (1, T, N, C)
-            if x.shape[-1] >= 7:  # Has [x, y, z, zone, doppler, snr, density]
-                aux_features = x[0, :, :, 4:7].detach().cpu().numpy()  # (T, N, 3)
+            for j, (xi, yi, xlabel, ylabel) in enumerate(projections):
+                # True class saliency
+                sc1 = axes[0, j].scatter(pts[:, xi], pts[:, yi], c=sal_t, cmap='hot', s=20, alpha=0.8)
+                axes[0, j].set_xlabel(xlabel)
+                axes[0, j].set_ylabel(ylabel)
+                axes[0, j].set_title(f'True: {true_class_name}')
+                plt.colorbar(sc1, ax=axes[0, j])
 
-                # Doppler correlation with TRUE class saliency
-                visualize_doppler_saliency_correlation(
-                    points, sal_true, aux_features,
-                    title=f"FN: True={true_class_name} - Doppler-Saliency Correlation (True Class)\n{info_str}",
-                    save_path=os.path.join(output_dir, 'false_negatives', f'fn_{i}_doppler_corr_true_subj{subject_id}_scen{scenario_id}_{true_class_name}.png')
-                )
+                # Predicted class saliency
+                sc2 = axes[1, j].scatter(pts[:, xi], pts[:, yi], c=sal_p, cmap='hot', s=20, alpha=0.8)
+                axes[1, j].set_xlabel(xlabel)
+                axes[1, j].set_ylabel(ylabel)
+                axes[1, j].set_title(f'Pred: {pred_class_name}')
+                plt.colorbar(sc2, ax=axes[1, j])
 
-                # Doppler correlation with PREDICTED class saliency
-                visualize_doppler_saliency_correlation(
-                    points, sal_pred, aux_features,
-                    title=f"FN: Pred={pred_class_name} - Doppler-Saliency Correlation (Pred Class)\n{info_str}",
-                    save_path=os.path.join(output_dir, 'false_negatives', f'fn_{i}_doppler_corr_pred_subj{subject_id}_scen{scenario_id}_{pred_class_name}.png')
-                )
-            elif x.shape[-1] >= 5:  # Has [x, y, z, zone, doppler]
-                aux_features = x[0, :, :, 4:5].detach().cpu().numpy()  # (T, N, 1)
+            fig.suptitle(f'False Negative: True={true_class_name}, Predicted={pred_class_name}\n{info_str}', fontsize=14)
+            plt.tight_layout()
+            plt.savefig(os.path.join(output_dir, output_subdir, f'sample_{idx}_comparison_subj{subject_id}_scen{scenario_id}.png'), dpi=150, bbox_inches='tight')
+            plt.close()
 
-                # Doppler correlation with TRUE class saliency
-                visualize_doppler_saliency_correlation(
-                    points, sal_true, aux_features,
-                    title=f"FN: True={true_class_name} - Doppler-Saliency Correlation (True Class)\n{info_str}",
-                    save_path=os.path.join(output_dir, 'false_negatives', f'fn_{i}_doppler_corr_true_subj{subject_id}_scen{scenario_id}_{true_class_name}.png')
-                )
+            # Temporal importance
+            if x.dim() == 4:
+                temp_imp = explainer.extract_temporal_attention(x)
+                if temp_imp is not None:
+                    visualize_temporal_importance(
+                        temp_imp[0],
+                        title=f"FN: True={true_class_name}, Pred={pred_class_name} - Temporal\n{info_str}",
+                        save_path=os.path.join(output_dir, output_subdir, f'sample_{idx}_temporal_subj{subject_id}_scen{scenario_id}.png')
+                    )
 
-                # Doppler correlation with PREDICTED class saliency
-                visualize_doppler_saliency_correlation(
-                    points, sal_pred, aux_features,
-                    title=f"FN: Pred={pred_class_name} - Doppler-Saliency Correlation (Pred Class)\n{info_str}",
-                    save_path=os.path.join(output_dir, 'false_negatives', f'fn_{i}_doppler_corr_pred_subj{subject_id}_scen{scenario_id}_{pred_class_name}.png')
-                )
-        elif x.dim() == 3:  # Non-temporal: (1, N, C)
-            if x.shape[-1] >= 7:  # Has [x, y, z, zone, doppler, snr, density]
-                aux_features = x[0, :, 4:7].detach().cpu().numpy()  # (N, 3)
+            # Doppler-Saliency Correlation for both True and Pred
+            if x.dim() == 4:  # Temporal
+                if x.shape[-1] >= 7:
+                    aux_features = x[0, :, :, 4:7].detach().cpu().numpy()
+                    # True class
+                    visualize_doppler_saliency_correlation(
+                        points, sal_true, aux_features,
+                        title=f"FN: True={true_class_name} - Doppler-Saliency Correlation (True Class)\n{info_str}",
+                        save_path=os.path.join(output_dir, output_subdir, f'sample_{idx}_doppler_corr_true_subj{subject_id}_scen{scenario_id}_{true_class_name}.png')
+                    )
+                    # Pred class
+                    visualize_doppler_saliency_correlation(
+                        points, sal_pred, aux_features,
+                        title=f"FN: Pred={pred_class_name} - Doppler-Saliency Correlation (Pred Class)\n{info_str}",
+                        save_path=os.path.join(output_dir, output_subdir, f'sample_{idx}_doppler_corr_pred_subj{subject_id}_scen{scenario_id}_{pred_class_name}.png')
+                    )
+                elif x.shape[-1] >= 5:
+                    aux_features = x[0, :, :, 4:5].detach().cpu().numpy()
+                    # True class
+                    visualize_doppler_saliency_correlation(
+                        points, sal_true, aux_features,
+                        title=f"FN: True={true_class_name} - Doppler-Saliency Correlation (True Class)\n{info_str}",
+                        save_path=os.path.join(output_dir, output_subdir, f'sample_{idx}_doppler_corr_true_subj{subject_id}_scen{scenario_id}_{true_class_name}.png')
+                    )
+                    # Pred class
+                    visualize_doppler_saliency_correlation(
+                        points, sal_pred, aux_features,
+                        title=f"FN: Pred={pred_class_name} - Doppler-Saliency Correlation (Pred Class)\n{info_str}",
+                        save_path=os.path.join(output_dir, output_subdir, f'sample_{idx}_doppler_corr_pred_subj{subject_id}_scen{scenario_id}_{pred_class_name}.png')
+                    )
+            elif x.dim() == 3:  # Non-temporal
+                if x.shape[-1] >= 7:
+                    aux_features = x[0, :, 4:7].detach().cpu().numpy()
+                    # True class
+                    visualize_doppler_saliency_correlation(
+                        points, sal_true, aux_features,
+                        title=f"FN: True={true_class_name} - Doppler-Saliency Correlation (True Class)\n{info_str}",
+                        save_path=os.path.join(output_dir, output_subdir, f'sample_{idx}_doppler_corr_true_subj{subject_id}_scen{scenario_id}_{true_class_name}.png')
+                    )
+                    # Pred class
+                    visualize_doppler_saliency_correlation(
+                        points, sal_pred, aux_features,
+                        title=f"FN: Pred={pred_class_name} - Doppler-Saliency Correlation (Pred Class)\n{info_str}",
+                        save_path=os.path.join(output_dir, output_subdir, f'sample_{idx}_doppler_corr_pred_subj{subject_id}_scen{scenario_id}_{pred_class_name}.png')
+                    )
+                elif x.shape[-1] >= 5:
+                    aux_features = x[0, :, 4:5].detach().cpu().numpy()
+                    # True class
+                    visualize_doppler_saliency_correlation(
+                        points, sal_true, aux_features,
+                        title=f"FN: True={true_class_name} - Doppler-Saliency Correlation (True Class)\n{info_str}",
+                        save_path=os.path.join(output_dir, output_subdir, f'sample_{idx}_doppler_corr_true_subj{subject_id}_scen{scenario_id}_{true_class_name}.png')
+                    )
+                    # Pred class
+                    visualize_doppler_saliency_correlation(
+                        points, sal_pred, aux_features,
+                        title=f"FN: Pred={pred_class_name} - Doppler-Saliency Correlation (Pred Class)\n{info_str}",
+                        save_path=os.path.join(output_dir, output_subdir, f'sample_{idx}_doppler_corr_pred_subj{subject_id}_scen{scenario_id}_{pred_class_name}.png')
+                    )
 
-                # Doppler correlation with TRUE class saliency
-                visualize_doppler_saliency_correlation(
-                    points, sal_true, aux_features,
-                    title=f"FN: True={true_class_name} - Doppler-Saliency Correlation (True Class)\n{info_str}",
-                    save_path=os.path.join(output_dir, 'false_negatives', f'fn_{i}_doppler_corr_true_subj{subject_id}_scen{scenario_id}_{true_class_name}.png')
-                )
-
-                # Doppler correlation with PREDICTED class saliency
-                visualize_doppler_saliency_correlation(
-                    points, sal_pred, aux_features,
-                    title=f"FN: Pred={pred_class_name} - Doppler-Saliency Correlation (Pred Class)\n{info_str}",
-                    save_path=os.path.join(output_dir, 'false_negatives', f'fn_{i}_doppler_corr_pred_subj{subject_id}_scen{scenario_id}_{pred_class_name}.png')
-                )
-            elif x.shape[-1] >= 5:  # Has [x, y, z, zone, doppler]
-                aux_features = x[0, :, 4:5].detach().cpu().numpy()  # (N, 1)
-
-                # Doppler correlation with TRUE class saliency
-                visualize_doppler_saliency_correlation(
-                    points, sal_true, aux_features,
-                    title=f"FN: True={true_class_name} - Doppler-Saliency Correlation (True Class)\n{info_str}",
-                    save_path=os.path.join(output_dir, 'false_negatives', f'fn_{i}_doppler_corr_true_subj{subject_id}_scen{scenario_id}_{true_class_name}.png')
-                )
-
-                # Doppler correlation with PREDICTED class saliency
-                visualize_doppler_saliency_correlation(
-                    points, sal_pred, aux_features,
-                    title=f"FN: Pred={pred_class_name} - Doppler-Saliency Correlation (Pred Class)\n{info_str}",
-                    save_path=os.path.join(output_dir, 'false_negatives', f'fn_{i}_doppler_corr_pred_subj{subject_id}_scen{scenario_id}_{pred_class_name}.png')
-                )
-        # ============================================================================
 
     # Generate summary statistics
     logging.info("Generating summary statistics...")
@@ -1193,8 +1178,8 @@ def run_explainability_analysis(model, test_loader, class_names, output_dir,
     logging.info("EXPLAINABILITY ANALYSIS COMPLETE!")
     logging.info("="*70)
     logging.info(f"Total visualizations generated:")
-    logging.info(f"  - True Positives: {len(tp_sample_idx)} samples")
-    logging.info(f"  - False Negatives: {len(fn_sample_idx)} samples")
+    logging.info(f"  - True Positives: {correct_in_selected} samples")
+    logging.info(f"  - False Negatives: {incorrect_in_selected} samples")
     logging.info(f"Output saved to: {output_dir}")
     logging.info("="*70)
 
