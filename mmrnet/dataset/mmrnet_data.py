@@ -824,6 +824,9 @@ class MMRActionData(Dataset):
             root, transform, pre_transform, pre_filter)
         self._parse_config(mmr_dataset_config)
 
+        # Store partition to control normalization behavior
+        self.partition = partition
+
         # Initialize action labels based on dataset type
         if "carelab" in self.raw_data_path:
             self.action_label = []  # Will be populated during processing
@@ -1218,19 +1221,34 @@ class MMRActionData(Dataset):
         The data is stored in temporal format (T, N, C).
         If use_temporal_format=False, it will be reshaped to concatenated format (T*N, C).
 
+        During TEST only: Both formats apply centroid normalization to ensure consistent
+        coordinate frames across models for fair explainability comparison.
+        During TRAIN/VAL: Only non-temporal format applies normalization (original behavior).
+
         Returns:
             x: Tensor of shape (T, N, C) for temporal format or (T*N, C) for concatenated format
             y: Label tensor
         """
         data_point = self.data[idx]
         x = data_point['new_x']  # Stored as (T, N, C)
+        T, N, C = x.shape
 
         if not self.use_temporal_format:
             # Reshape from (T, N, C) to (T*N, C) for non-temporal models
-            T, N, C = x.shape
             x = x.reshape(T * N, C)
-            # Apply normalization to concatenated format
+            # Apply normalization to concatenated format (always, for all partitions)
             x = self._normalize_stack_by_centroid(x)
+        else:
+            # For temporal format during TEST: apply per-frame normalization for consistent visualization
+            # During TRAIN/VAL: keep original behavior (no normalization) to preserve trained model performance
+            if self.partition == 'test':
+                x_normalized = []
+                for t in range(T):
+                    frame = x[t]  # (N, C)
+                    frame_normalized = self._normalize_stack_by_centroid(frame)
+                    x_normalized.append(frame_normalized)
+                x = np.stack(x_normalized, axis=0)  # (T, N, C)
+            # else: keep x as-is for train/val (original behavior)
 
         x = torch.tensor(x, dtype=torch.float32)
         y = torch.tensor(data_point['y'], dtype=self.target_dtype)
