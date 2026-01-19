@@ -345,7 +345,7 @@ class PointCloudExplainer:
 
 
 def visualize_point_saliency_3d(points, saliency, title="Point Saliency", save_path=None,
-                                  frame_idx=None, view_angles=(30, 45), radar_height=3.20):
+                                  frame_idx=None, view_angles=(30, 45), radar_height=2.30):
     """
     Visualize point cloud with saliency coloring in 3D from radar's perspective.
 
@@ -356,7 +356,7 @@ def visualize_point_saliency_3d(points, saliency, title="Point Saliency", save_p
         save_path: Path to save figure
         frame_idx: If temporal data, which frame to visualize (None = average)
         view_angles: (elevation, azimuth) for 3D view
-        radar_height: Height of radar above ground (default 3.20m)
+        radar_height: Height of radar above ground (default 2.30m)
     """
     fig = plt.figure(figsize=(12, 10))
     ax = fig.add_subplot(111, projection='3d')
@@ -415,7 +415,7 @@ def visualize_point_saliency_3d(points, saliency, title="Point Saliency", save_p
 
 
 def visualize_point_saliency_2d(points, saliency, title="Point Saliency", save_path=None,
-                                  frame_idx=None, radar_height=3.20):
+                                  frame_idx=None, radar_height=2.30):
     """
     Visualize point cloud saliency in 2D projections (XY, XZ, YZ) from radar's perspective.
 
@@ -425,7 +425,7 @@ def visualize_point_saliency_2d(points, saliency, title="Point Saliency", save_p
         title: Plot title
         save_path: Path to save figure
         frame_idx: If temporal data, which frame to visualize
-        radar_height: Height of radar above ground (default 3.20m)
+        radar_height: Height of radar above ground (default 2.30m)
     """
     fig, axes = plt.subplots(1, 3, figsize=(15, 5))
 
