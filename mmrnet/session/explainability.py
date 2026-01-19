@@ -375,10 +375,6 @@ def visualize_point_saliency_3d(points, saliency, title="Point Saliency", save_p
         pts = points.copy()
         sal = saliency
 
-    # Adjust Z coordinates: radar is at height 2.20m, so add radar_height to z
-    # This converts from radar frame (z=0 at radar) to ground frame (z=0 at ground)
-    pts[:, 2] = pts[:, 2] + radar_height
-
     # Sort points by saliency (ascending) so high-saliency points are drawn on top
     sort_idx = np.argsort(sal)
     pts = pts[sort_idx]
@@ -445,9 +441,6 @@ def visualize_point_saliency_2d(points, saliency, title="Point Saliency", save_p
     else:
         pts = points.copy()
         sal = saliency
-
-    # Adjust Z coordinates: radar is at height 2.20m
-    pts[:, 2] = pts[:, 2] + radar_height
 
     # Sort points by saliency (ascending) so high-saliency points are drawn on top
     sort_idx = np.argsort(sal)
