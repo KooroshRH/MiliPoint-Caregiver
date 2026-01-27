@@ -427,6 +427,7 @@ def visualize_point_saliency_2d(points, saliency, title="Point Saliency", save_p
         frame_idx: If temporal data, which frame to visualize
         radar_height: Height of radar above ground (default 2.30m)
     """
+    plt.rcParams['font.family'] = 'Times New Roman'
     fig, axes = plt.subplots(1, 3, figsize=(15, 5))
 
     if points.ndim == 3:
@@ -455,9 +456,9 @@ def visualize_point_saliency_2d(points, saliency, title="Point Saliency", save_p
 
     for ax, (x, y, xlabel, ylabel, proj_title) in zip(axes, projections):
         scatter = ax.scatter(x, y, c=sal, cmap='hot', s=30, alpha=0.8)
-        ax.set_xlabel(xlabel, fontsize=14, fontweight='bold')
-        ax.set_ylabel(ylabel, fontsize=14, fontweight='bold')
-        ax.set_title(proj_title, fontsize=15, fontweight='bold')
+        ax.set_xlabel(xlabel, fontsize=14, fontweight='bold', labelpad=8)
+        ax.set_ylabel(ylabel, fontsize=14, fontweight='bold', labelpad=8)
+        ax.set_title(proj_title, fontsize=15, fontweight='bold', pad=10)
         ax.set_aspect('equal')
         ax.tick_params(axis='both', which='major', labelsize=12)
         cbar = plt.colorbar(scatter, ax=ax, label='Saliency')
@@ -468,13 +469,13 @@ def visualize_point_saliency_2d(points, saliency, title="Point Saliency", save_p
         if 'X' in xlabel and 'Y' in ylabel:  # XY projection
             ax.scatter([0], [0], c='red', marker='^', s=100, edgecolors='black',
                       linewidths=1.5, label='Radar', zorder=10)
-            ax.legend(loc='upper left', fontsize=11, framealpha=0.9)
+            ax.legend(loc='upper left', fontsize=11, framealpha=0.9, prop={'family': 'Times New Roman'})
         elif 'X' in xlabel and 'Z' in ylabel:  # XZ projection
             ax.axhline(y=radar_height, color='red', linestyle='--', linewidth=1, alpha=0.7, label='Radar Height')
-            ax.legend(loc='upper left', fontsize=11, framealpha=0.9)
+            ax.legend(loc='upper left', fontsize=11, framealpha=0.9, prop={'family': 'Times New Roman'})
         elif 'Y' in xlabel and 'Z' in ylabel:  # YZ projection
             ax.axhline(y=radar_height, color='red', linestyle='--', linewidth=1, alpha=0.7, label='Radar Height')
-            ax.legend(loc='upper left', fontsize=11, framealpha=0.9)
+            ax.legend(loc='upper left', fontsize=11, framealpha=0.9, prop={'family': 'Times New Roman'})
 
     plt.tight_layout()
 
@@ -699,6 +700,7 @@ def visualize_tsne_risk_categorization(embeddings, labels, predictions, risk_map
     correct_mask = labels == predictions
 
     # Create figure with 2 subplots
+    plt.rcParams['font.family'] = 'Times New Roman'
     fig, axes = plt.subplots(1, 2, figsize=(20, 8))
 
     # Define risk colors
@@ -713,10 +715,10 @@ def visualize_tsne_risk_categorization(embeddings, labels, predictions, risk_map
                           c=risk_colors[risk_level], label=risk_labels_names[risk_level],
                           alpha=0.6, s=50, edgecolors='black', linewidths=0.5)
 
-    axes[0].set_xlabel('t-SNE Dimension 1', fontsize=18, fontweight='bold')
-    axes[0].set_ylabel('t-SNE Dimension 2', fontsize=18, fontweight='bold')
-    axes[0].set_title('True Risk Categories', fontsize=20, fontweight='bold')
-    axes[0].legend(loc='upper left', bbox_to_anchor=(1.02, 1), fontsize=16, framealpha=0.9)
+    axes[0].set_xlabel('t-SNE Dimension 1', fontsize=18, fontweight='bold', labelpad=10)
+    axes[0].set_ylabel('t-SNE Dimension 2', fontsize=18, fontweight='bold', labelpad=10)
+    axes[0].set_title('True Risk Categories', fontsize=20, fontweight='bold', pad=15)
+    axes[0].legend(loc='upper left', bbox_to_anchor=(1.02, 1), fontsize=16, framealpha=0.9, prop={'family': 'Times New Roman'})
     axes[0].tick_params(axis='both', which='major', labelsize=14)
     axes[0].grid(alpha=0.3)
 
@@ -731,10 +733,10 @@ def visualize_tsne_risk_categorization(embeddings, labels, predictions, risk_map
                    c=[risk_colors[r] for r in risk_labels[~correct_mask]],
                    marker='X', alpha=0.8, s=100, edgecolors='red', linewidths=2, label='Incorrect')
 
-    axes[1].set_xlabel('t-SNE Dimension 1', fontsize=18, fontweight='bold')
-    axes[1].set_ylabel('t-SNE Dimension 2', fontsize=18, fontweight='bold')
-    axes[1].set_title('Correct vs Incorrect Predictions', fontsize=20, fontweight='bold')
-    axes[1].legend(loc='upper left', bbox_to_anchor=(1.02, 1), fontsize=16, framealpha=0.9)
+    axes[1].set_xlabel('t-SNE Dimension 1', fontsize=18, fontweight='bold', labelpad=10)
+    axes[1].set_ylabel('t-SNE Dimension 2', fontsize=18, fontweight='bold', labelpad=10)
+    axes[1].set_title('Correct vs Incorrect Predictions', fontsize=20, fontweight='bold', pad=15)
+    axes[1].legend(loc='upper left', bbox_to_anchor=(1.02, 1), fontsize=16, framealpha=0.9, prop={'family': 'Times New Roman'})
     axes[1].tick_params(axis='both', which='major', labelsize=14)
     axes[1].grid(alpha=0.3)
 
@@ -755,12 +757,14 @@ def visualize_tsne_risk_categorization(embeddings, labels, predictions, risk_map
     from sklearn.metrics import confusion_matrix
     risk_cm = confusion_matrix(risk_labels, risk_preds, labels=[0, 1, 2, 3])
 
+    plt.rcParams['font.family'] = 'Times New Roman'
     sns.heatmap(risk_cm, annot=True, fmt='d', cmap='Blues', ax=ax,
                 xticklabels=['L1', 'L2', 'L3', 'L4'],
                 yticklabels=['L1', 'L2', 'L3', 'L4'],
-                annot_kws={'fontsize': 16}, cbar_kws={'shrink': 0.8})
-    ax.set_xlabel('Predicted Risk Category', fontsize=18, fontweight='bold')
-    ax.set_ylabel('True Risk Category', fontsize=18, fontweight='bold')
+                annot_kws={'fontsize': 16, 'fontfamily': 'Times New Roman'},
+                cbar_kws={'shrink': 0.8})
+    ax.set_xlabel('Predicted Risk Category', fontsize=18, fontweight='bold', labelpad=10)
+    ax.set_ylabel('True Risk Category', fontsize=18, fontweight='bold', labelpad=10)
     ax.tick_params(axis='both', which='major', labelsize=16)
 
     plt.tight_layout()
