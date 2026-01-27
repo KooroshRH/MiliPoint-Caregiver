@@ -213,12 +213,15 @@ class ModelWrapper(pl.LightningModule):
         print(f"\nConfusion Matrix (Merged Classes): \n{cm_merged}")
         
         # Plot confusion matrix for merged classes
-        plt.figure(figsize=(10, 8))
-        sns.heatmap(cm_merged, annot=True, fmt='d', cmap='Blues')
-        plt.xlabel('Predicted')
-        plt.ylabel('True')
-        plt.title('Confusion Matrix (Merged Classes)')
-        plt.savefig(f'confusion_matrix_merged_epoch_{self.current_epoch}.png')
+        plt.figure(figsize=(6, 5))
+        sns.heatmap(cm_merged, annot=True, fmt='d', cmap='Blues',
+                    annot_kws={'fontsize': 16}, cbar_kws={'shrink': 0.8})
+        plt.xlabel('Predicted', fontsize=18, fontweight='bold')
+        plt.ylabel('True', fontsize=18, fontweight='bold')
+        plt.xticks(fontsize=16)
+        plt.yticks(fontsize=16)
+        plt.tight_layout()
+        plt.savefig(f'confusion_matrix_merged_epoch_{self.current_epoch}.png', dpi=300, bbox_inches='tight')
         plt.close()
 
         print(f"\n\nTest F1 score (Before Merging): {f1_before_merge}")
