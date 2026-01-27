@@ -380,8 +380,8 @@ def visualize_point_saliency_3d(points, saliency, title="Point Saliency", save_p
     pts = pts[sort_idx]
     sal = sal[sort_idx]
 
-    pts[:, 0] = pts[:, 0] + 2.4
-    pts[:, 1] = pts[:, 1] + 1.45
+    #pts[:, 0] = pts[:, 0] + 2.45
+    #pts[:, 1] = pts[:, 1] + 1.45
 
     # Create colormap
     norm = Normalize(vmin=sal.min(), vmax=sal.max())
@@ -450,8 +450,8 @@ def visualize_point_saliency_2d(points, saliency, title="Point Saliency", save_p
     pts = pts[sort_idx]
     sal = sal[sort_idx]
 
-    pts[:, 0] = pts[:, 0] + 2.4
-    pts[:, 1] = pts[:, 1] + 1.45
+    #pts[:, 0] = pts[:, 0] + 2.45
+    #pts[:, 1] = pts[:, 1] + 1.45
 
     projections = [
         (pts[:, 0], pts[:, 1], 'X (m)', 'Y (m)', 'XY Projection (Top View)'),
