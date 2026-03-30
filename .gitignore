@@ -9,3 +9,5 @@ checkpoints/
 lightning_logs/
 *.png
 milenv/
+outputs.zip
+checkpoints/README.md
