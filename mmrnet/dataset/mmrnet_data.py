@@ -852,6 +852,7 @@ class MMRActionData(Dataset):
             self.data, _ = self._process()
 
             logging.info(f"Saving processed data to: {self.processed_data}")
+            os.makedirs(os.path.dirname(self.processed_data), exist_ok=True)
             with open(self.processed_data, 'wb') as f:
                 pickle.dump(self.data, f)
             logging.info("✓ Processed data saved successfully")
