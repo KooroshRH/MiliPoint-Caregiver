@@ -45,15 +45,18 @@ def load_imu_csv(csv_path):
     where millisecond offsets are inferred from sample count within each second.
     """
     raw_rows = []
-    with open(csv_path, 'r') as f:
+    with open(csv_path, 'r', encoding='utf-8', errors='replace') as f:
         reader = csv.reader(f)
         next(reader)  # skip header
         for row in reader:
             if len(row) < 4:
                 continue
-            ts = parse_imu_timestamp(row[0])
-            values = [float(row[1]), float(row[2]), float(row[3])]
-            raw_rows.append((ts, values))
+            try:
+                ts = parse_imu_timestamp(row[0])
+                values = [float(row[1]), float(row[2]), float(row[3])]
+                raw_rows.append((ts, values))
+            except Exception:
+                continue
 
     if not raw_rows:
         return []
@@ -99,13 +102,16 @@ def load_ble_csv(csv_path):
     raw = defaultdict(dict)  # ts_str -> {mac: rssi}
     ts_order = []            # preserve insertion order of timestamps
 
-    with open(csv_path, 'r') as f:
+    with open(csv_path, 'r', encoding='utf-8', errors='replace') as f:
         reader = csv.reader(f)
         next(reader)  # skip header
         for row in reader:
             if len(row) < 3:
                 continue
-            ts_str, mac, rssi = row[0].strip(), row[1].strip(), float(row[2])
+            try:
+                ts_str, mac, rssi = row[0].strip(), row[1].strip(), float(row[2])
+            except Exception:
+                continue
             if ts_str not in raw:
                 ts_order.append(ts_str)
             raw[ts_str][mac] = rssi
