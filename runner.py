@@ -283,10 +283,10 @@ Examples:
     # Config parameters (from your config file) - with grid search support
     parser.add_argument('--seed', type=str, default='20', action=MultiNumericAction, value_type=int,
                         help='Random seed (comma-separated for grid search, e.g., 20,42,123)')
-    parser.add_argument('--raw-data-path', type=str, default='data/raw_carelab_zoned',
+    parser.add_argument('--raw-data-path', type=str, default='/cluster/projects/kite/koorosh/Data/Koorosh-CareLab-Data-Processed',
                         help='Path to raw data')
-    parser.add_argument('--processed-data-base', type=str, 
-                        default='/cluster/projects/kite/koorosh/Data/MiliPointCareLab/data/processed_carelab/mmr_action',
+    parser.add_argument('--processed-data-base', type=str,
+                        default='/cluster/projects/kite/koorosh/Data/Koorosh-CareLab-Data-Processed/stacked',
                         help='Base path for processed data (will be combined with seed, stacks, max_points, zero_padding)')
     parser.add_argument('--processed-data-task', type=str, default='action',
                         help='Task name for processed data filename')
