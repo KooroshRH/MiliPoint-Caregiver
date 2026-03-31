@@ -11,6 +11,14 @@ RADAR_AZIMUTH = 285  # degrees
 RADAR_X = 0.14       # radar position x
 RADAR_Y = 0.35       # radar position y
 
+# BLE beacon MAC addresses (consistent across all subjects/scenarios)
+# Order defines the 3 RSSI channels: [beacon_1, beacon_2, beacon_3]
+BLE_BEACONS = [
+    'AC:23:3F:AB:CA:2F',  # beacon 1
+    'AC:23:3F:AB:CA:A4',  # beacon 2
+    'AC:23:3F:F0:95:3A',  # beacon 3
+]
+
 
 # ---------------------------------------------------------------------------
 # IMU / BLE loading and timestamp alignment
@@ -30,10 +38,10 @@ def parse_imu_timestamp(ts_str):
 
 def load_imu_csv(csv_path):
     """
-    Load an IMU/BLE CSV file (acc, gyro, or ble).
-    First row is header. Columns: timestamp, val1, val2, val3.
+    Load an IMU CSV file (acc or gyro).
+    First row is header. Columns: timestamp, x, y, z.
 
-    Returns list of (datetime_with_ms, [val1, val2, val3]) tuples,
+    Returns list of (datetime_with_ms, [x, y, z]) tuples,
     where millisecond offsets are inferred from sample count within each second.
     """
     raw_rows = []
@@ -68,6 +76,63 @@ def load_imu_csv(csv_path):
             ms_offset = int((idx / n_samples) * 1000)
             ts_with_ms = ts.replace(microsecond=ms_offset * 1000)
             result.append((ts_with_ms, values))
+
+        i = j
+
+    return result
+
+
+def load_ble_csv(csv_path):
+    """
+    Load a BLE CSV file.
+    First row is header. Columns: timestamp, mac_addr, rssi.
+    Each timestamp may have multiple rows (one per beacon).
+
+    Pivots into one entry per timestamp with 3 RSSI values ordered by BLE_BEACONS.
+    Missing beacon readings for a timestamp are filled with 0.0.
+
+    Returns list of (datetime_with_ms, [rssi_1, rssi_2, rssi_3]) tuples,
+    where millisecond offsets are inferred from number of unique timestamps per second.
+    """
+    # Read all rows grouped by timestamp
+    from collections import defaultdict
+    raw = defaultdict(dict)  # ts_str -> {mac: rssi}
+    ts_order = []            # preserve insertion order of timestamps
+
+    with open(csv_path, 'r') as f:
+        reader = csv.reader(f)
+        next(reader)  # skip header
+        for row in reader:
+            if len(row) < 3:
+                continue
+            ts_str, mac, rssi = row[0].strip(), row[1].strip(), float(row[2])
+            if ts_str not in raw:
+                ts_order.append(ts_str)
+            raw[ts_str][mac] = rssi
+
+    if not ts_order:
+        return []
+
+    # Parse timestamps and group unique timestamps by second
+    parsed = [(ts_str, parse_imu_timestamp(ts_str)) for ts_str in ts_order]
+
+    # Group by second to infer millisecond offsets
+    result = []
+    i = 0
+    while i < len(parsed):
+        current_sec = parsed[i][1]
+        group = []
+        j = i
+        while j < len(parsed) and parsed[j][1] == current_sec:
+            group.append(parsed[j])
+            j += 1
+
+        n_samples = len(group)
+        for idx, (ts_str, ts) in enumerate(group):
+            ms_offset = int((idx / n_samples) * 1000)
+            ts_with_ms = ts.replace(microsecond=ms_offset * 1000)
+            rssi_vals = [raw[ts_str].get(mac, 0.0) for mac in BLE_BEACONS]
+            result.append((ts_with_ms, rssi_vals))
 
         i = j
 
@@ -139,7 +204,7 @@ def load_frame_level_signals(scenario_folder):
         print(f"  WARNING: gyro.csv not found at {gyro_path}")
 
     if os.path.exists(ble_path):
-        ble_data = load_imu_csv(ble_path)
+        ble_data = load_ble_csv(ble_path)
         ble_lookup = build_imu_lookup(ble_data)
     else:
         print(f"  WARNING: ble.csv not found at {ble_path}")
@@ -511,7 +576,7 @@ def process_scenario_folder(scenario_folder, subject, scenario, output_dir):
     return scenario_stats
 
 
-def traverse_and_process_folder(root_folder, output_dir="data/raw_carelab_aux_2"):
+def traverse_and_process_folder(root_folder, output_dir="/cluster/projects/kite/koorosh/Data/Koorosh-CareLab-Data-Processed"):
     print("=== CARELAB DATA EXTRACTOR V2 (with IMU + BLE, no zone) ===")
     print(f"Input:  {root_folder}")
     print(f"Output: {output_dir}")
@@ -545,6 +610,6 @@ if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser(description="CareLab Data Extractor V2 (with IMU + BLE)")
     parser.add_argument("--input", type=str, required=True, help="Root folder of raw CareLab data")
-    parser.add_argument("--output", type=str, default="data/raw_carelab_aux_2", help="Output directory for pickle files")
+    parser.add_argument("--output", type=str, default="/cluster/projects/kite/koorosh/Data/Koorosh-CareLab-Data-Processed", help="Output directory for pickle files")
     args = parser.parse_args()
     traverse_and_process_folder(args.input, args.output)
