@@ -511,7 +511,7 @@ def process_scenario_folder(scenario_folder, subject, scenario, output_dir):
     return scenario_stats
 
 
-def traverse_and_process_folder(root_folder, output_dir="data/raw_carelab_v2"):
+def traverse_and_process_folder(root_folder, output_dir="data/raw_carelab_aux_2"):
     print("=== CARELAB DATA EXTRACTOR V2 (with IMU + BLE, no zone) ===")
     print(f"Input:  {root_folder}")
     print(f"Output: {output_dir}")
@@ -545,6 +545,6 @@ if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser(description="CareLab Data Extractor V2 (with IMU + BLE)")
     parser.add_argument("--input", type=str, required=True, help="Root folder of raw CareLab data")
-    parser.add_argument("--output", type=str, default="data/raw_carelab_v2", help="Output directory for pickle files")
+    parser.add_argument("--output", type=str, default="data/raw_carelab_aux_2", help="Output directory for pickle files")
     args = parser.parse_args()
     traverse_and_process_folder(args.input, args.output)
