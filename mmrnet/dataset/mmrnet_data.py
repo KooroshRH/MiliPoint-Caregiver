@@ -657,7 +657,7 @@ class MMRActionData(Dataset):
         use_augmentation: Whether to apply data augmentation during training
     """
     # Default configuration parameters
-    raw_data_path = 'data/raw_carelab_zoned'
+    raw_data_path = '/cluster/projects/kite/koorosh/Data/Koorosh-CareLab-Data-Processed'
     processed_data = 'data/processed/mmr_act/data.pkl'
 
     # Healthcare action label mapping (30 distinct actions)
@@ -1218,19 +1218,18 @@ class MMRActionData(Dataset):
         """
         Get a single data sample from the MMRActionData dataset.
 
-        The data is stored in temporal format (T, N, C).
-        If use_temporal_format=False, it will be reshaped to concatenated format (T*N, C).
-
-        During TEST only: Both formats apply centroid normalization to ensure consistent
-        coordinate frames across models for fair explainability comparison.
-        During TRAIN/VAL: Only non-temporal format applies normalization (original behavior).
+        The point cloud is stored in temporal format (T, N, C) where C=6 [X,Y,Z,Doppler,SNR,Density].
+        Frame-level signals (T, 9) contain [acc(3), gyro(3), ble_rssi(3)] per frame.
 
         Returns:
-            x: Tensor of shape (T, N, C) for temporal format or (T*N, C) for concatenated format
+            x: Tuple of (point_cloud_tensor, frame_signals_tensor) where:
+               - point_cloud_tensor: shape (T, N, 6) or (T*N, 6) depending on use_temporal_format
+               - frame_signals_tensor: shape (T, 9)
             y: Label tensor
         """
         data_point = self.data[idx]
-        x = data_point['new_x']  # Stored as (T, N, C)
+        x = data_point['new_x']  # Stored as (T, N, 6)
+        frame_signals = data_point['new_frame_signals']  # Stored as (T, 9)
         T, N, C = x.shape
 
         if not self.use_temporal_format:
@@ -1238,21 +1237,11 @@ class MMRActionData(Dataset):
             x = x.reshape(T * N, C)
             # Apply normalization to concatenated format (always, for all partitions)
             x = self._normalize_stack_by_centroid(x)
-        # else:
-        #     # For temporal format during TEST: apply per-frame normalization for consistent visualization
-        #     # During TRAIN/VAL: keep original behavior (no normalization) to preserve trained model performance
-        #     if self.partition == 'test':
-        #         x_normalized = []
-        #         for t in range(T):
-        #             frame = x[t]  # (N, C)
-        #             frame_normalized = self._normalize_stack_by_centroid(frame)
-        #             x_normalized.append(frame_normalized)
-        #         x = np.stack(x_normalized, axis=0)  # (T, N, C)
-        #     # else: keep x as-is for train/val (original behavior)
 
         x = torch.tensor(x, dtype=torch.float32)
-        y = torch.tensor(data_point['y'], dtype=self.target_dtype)
-        return x, y
+        frame_signals = torch.tensor(frame_signals, dtype=torch.float32)
+        y = torch.tensor(data_point['label'], dtype=self.target_dtype)
+        return (x, frame_signals), y
 
     @property
     def raw_file_names(self):
@@ -1264,9 +1253,9 @@ class MMRActionData(Dataset):
             return [f'{self.raw_data_path}/{i}.pkl' for i in file_names]
 
     def _augment_data(self, data):
-        x = data['x']
+        x = data['point_cloud']
         x = self.augment(torch.tensor(x, dtype=torch.float32)).numpy()
-        data['x'] = x
+        data['point_cloud'] = x
         return data
 
     def _create_folds(self, data_list):
@@ -1366,114 +1355,23 @@ class MMRActionData(Dataset):
             if "carelab" in self.raw_data_path:
                 valid_mappings = 0
                 for data in group_data:
-                    if data['y'] != -1:
-                        data['y'] = self.carelab_label_map[data['y']]
+                    if data['label'] != -1:
+                        data['label'] = self.carelab_label_map[data['label']]
                         valid_mappings += 1
                 logging.info(f"  {group_key}: Mapped {valid_mappings}/{samples_before} carelab labels")
             else:
                 # For non-carelab datasets, use pre-loaded labels
-                # Note: This assumes action_label indexing aligns with data order
                 mapped_count = 0
                 for i, data in enumerate(group_data):
                     if i < len(self.action_label):
-                        data['y'] = self.action_label[i]
+                        data['label'] = self.action_label[i]
                         mapped_count += 1
                 logging.info(f"  {group_key}: Applied {mapped_count} pre-loaded labels")
 
             # Filter out invalid samples
-            data_list[group_key] = [d for d in group_data if d['y']!=-1 and d['x'].shape[0] > 0]
+            data_list[group_key] = [d for d in group_data if d['label'] != -1 and d['point_cloud'].shape[0] > 0]
             samples_after = len(data_list[group_key])
             logging.info(f"  {group_key}: {samples_before} → {samples_after} samples (filtered {samples_before-samples_after} invalid)")
-
-        # Analyze zone distribution and zone-to-label relationship
-        logging.info("ANALYZING ZONE DISTRIBUTION AND ZONE-LABEL RELATIONSHIPS")
-        logging.info("-" * 60)
-
-        # Collect all valid samples for analysis
-        all_samples = []
-        for group_data in data_list.values():
-            all_samples.extend(group_data)
-
-        if all_samples:
-            zone_counts = {}
-            zone_label_counts = {}
-            label_zone_counts = {}
-
-            for sample in all_samples:
-                x_data = sample['x']
-                label = sample['y']
-
-                if x_data.shape[0] > 0 and x_data.shape[1] >= 4:  # Ensure we have zone data (and possibly density)
-                    # Get zone from first point (all points in a frame should have same zone)
-                    zone = int(x_data[0, 3])
-
-                    # Count zones
-                    if zone not in zone_counts:
-                        zone_counts[zone] = 0
-                    zone_counts[zone] += 1
-
-                    # Count zone-label combinations
-                    if zone not in zone_label_counts:
-                        zone_label_counts[zone] = {}
-                    if label not in zone_label_counts[zone]:
-                        zone_label_counts[zone][label] = 0
-                    zone_label_counts[zone][label] += 1
-
-                    # Count label-zone combinations (reverse mapping)
-                    if label not in label_zone_counts:
-                        label_zone_counts[label] = {}
-                    if zone not in label_zone_counts[label]:
-                        label_zone_counts[label][zone] = 0
-                    label_zone_counts[label][zone] += 1
-
-            # Log zone distribution
-            total_samples_analyzed = len(all_samples)
-            logging.info(f"Zone Distribution Analysis ({total_samples_analyzed} total samples):")
-            logging.info("Zone ID | Count | Percentage")
-            logging.info("-" * 30)
-            for zone in sorted(zone_counts.keys()):
-                count = zone_counts[zone]
-                percentage = (count / total_samples_analyzed) * 100
-                logging.info(f"Zone {zone:2d} | {count:5d} | {percentage:6.2f}%")
-
-            # Log zone-to-label relationship
-            logging.info("\nZone-to-Label Distribution:")
-            logging.info("-" * 40)
-            for zone in sorted(zone_label_counts.keys()):
-                logging.info(f"Zone {zone}:")
-                zone_total = zone_counts[zone]
-                for label in sorted(zone_label_counts[zone].keys()):
-                    count = zone_label_counts[zone][label]
-                    percentage = (count / zone_total) * 100
-                    # Map label back to action name if possible
-                    action_name = "unknown"
-                    for name, idx in self.carelab_label_map.items():
-                        if idx == label:
-                            action_name = name
-                            break
-                    logging.info(f"  → Label {label:2d} ({action_name}): {count:4d} samples ({percentage:5.2f}%)")
-
-            # Log label-to-zone relationship (which zones each action occurs in)
-            logging.info("\nLabel-to-Zone Distribution:")
-            logging.info("-" * 40)
-            for label in sorted(label_zone_counts.keys()):
-                # Map label back to action name
-                action_name = "unknown"
-                for name, idx in self.carelab_label_map.items():
-                    if idx == label:
-                        action_name = name
-                        break
-
-                label_total = sum(label_zone_counts[label].values())
-                logging.info(f"Label {label:2d} ({action_name}): {label_total} total samples")
-                for zone in sorted(label_zone_counts[label].keys()):
-                    count = label_zone_counts[label][zone]
-                    percentage = (count / label_total) * 100
-                    logging.info(f"  → Zone {zone:2d}: {count:4d} samples ({percentage:5.2f}%)")
-
-            logging.info("-" * 60)
-        else:
-            logging.warning("No valid samples found for zone analysis")
 
         # Apply temporal frame stacking and padding (per subject-scenario group)
         logging.info("Applying frame stacking and padding per subject-scenario group...")
@@ -1496,8 +1394,7 @@ class MMRActionData(Dataset):
         Select points based on highest density values.
 
         Args:
-            points: numpy array with columns [x, y, z, zone], [x, y, z, zone, density],
-                    or [x, y, z, zone, doppler, snr, density]
+            points: numpy array with columns [x, y, z, doppler, snr, density]
             max_points: number of points to select
 
         Returns:
@@ -1508,12 +1405,9 @@ class MMRActionData(Dataset):
 
         # Determine density column index based on number of columns
         density_col_idx = None
-        if points.shape[1] == 5:
-            # Format: [x, y, z, zone, density]
-            density_col_idx = 4
-        elif points.shape[1] == 7:
-            # Format: [x, y, z, zone, doppler, snr, density]
-            density_col_idx = 6
+        if points.shape[1] == 6:
+            # Format: [x, y, z, doppler, snr, density]
+            density_col_idx = 5
 
         if density_col_idx is not None:
             # Has density column, use it for selection
@@ -1538,41 +1432,24 @@ class MMRActionData(Dataset):
         1. Compute the centroid of all points (x, y, z)
         2. Find the point closest to the centroid
         3. Translate all points to make this point the origin
-        4. Keep zone, doppler, and SNR values unchanged
-        5. If present, normalize density values by translating them relative to reference point's density
+        4. Keep doppler and SNR values unchanged
+        5. Normalize density values by translating relative to reference point's density
 
         Args:
-            stack: numpy array with columns [x, y, z, zone] or [x, y, z, zone, density]
-                   or [x, y, z, zone, doppler, snr, density]
+            stack: numpy array with columns [x, y, z, doppler, snr, density]
 
         Returns:
             Normalized stack with same shape
         """
-        if len(stack) == 0 or stack.shape[1] < 4:
+        if len(stack) == 0 or stack.shape[1] < 3:
             return stack
 
-        # Extract coordinates and features based on number of columns
-        if stack.shape[1] == 4:
-            # Format: [x, y, z, zone]
-            xyz = stack[:, :3]  # shape (N, 3)
-            zones = stack[:, 3:4]  # shape (N, 1)
-            doppler = None
-            snr = None
-            density = None
-        elif stack.shape[1] == 5:
-            # Format: [x, y, z, zone, density]
-            xyz = stack[:, :3]  # shape (N, 3)
-            zones = stack[:, 3:4]  # shape (N, 1)
-            doppler = None
-            snr = None
-            density = stack[:, 4:5]  # shape (N, 1)
-        elif stack.shape[1] == 7:
-            # Format: [x, y, z, zone, doppler, snr, density]
-            xyz = stack[:, :3]  # shape (N, 3)
-            zones = stack[:, 3:4]  # shape (N, 1)
-            doppler = stack[:, 4:5]  # shape (N, 1)
-            snr = stack[:, 5:6]  # shape (N, 1)
-            density = stack[:, 6:7]  # shape (N, 1)
+        if stack.shape[1] == 6:
+            # Format: [x, y, z, doppler, snr, density]
+            xyz = stack[:, :3]       # shape (N, 3)
+            doppler = stack[:, 3:4]  # shape (N, 1)
+            snr = stack[:, 4:5]      # shape (N, 1)
+            density = stack[:, 5:6]  # shape (N, 1)
         else:
             return stack  # Unknown format, return unchanged
 
@@ -1597,24 +1474,10 @@ class MMRActionData(Dataset):
         # Translate spatial coordinates to make reference point the origin
         normalized_xyz = xyz - reference_point
 
-        # Build the normalized stack based on which features are present
-        # Normalize density values if present (translate by reference point's density)
-        if doppler is not None and snr is not None and density is not None:
-            # Format: [x, y, z, zone, doppler, snr, density]
-            reference_density = density[closest_idx]  # Get density of reference point
-            normalized_density = density - reference_density
-            # Combine: normalized xyz, unchanged zones, unchanged doppler/snr, normalized density
-            normalized_stack = np.concatenate([normalized_xyz, zones, doppler, snr, normalized_density], axis=1)
-        elif density is not None:
-            # Format: [x, y, z, zone, density]
-            reference_density = density[closest_idx]  # Get density of reference point
-            normalized_density = density - reference_density
-            # Combine normalized spatial coords, unchanged zones, and normalized density
-            normalized_stack = np.concatenate([normalized_xyz, zones, normalized_density], axis=1)
-        else:
-            # Format: [x, y, z, zone]
-            # Combine normalized spatial coords with unchanged zones only
-            normalized_stack = np.concatenate([normalized_xyz, zones], axis=1)
+        # Normalize density relative to reference point's density; keep doppler/snr unchanged
+        reference_density = density[closest_idx]
+        normalized_density = density - reference_density
+        normalized_stack = np.concatenate([normalized_xyz, doppler, snr, normalized_density], axis=1)
 
         return normalized_stack
 
@@ -1626,10 +1489,10 @@ class MMRActionData(Dataset):
         The concatenated format (T*N, C) is created on-the-fly in get() when needed.
 
         Args:
-            data_list: List of data samples with 'x' (keypoints) and 'y' (labels)
+            data_list: List of data samples with 'point_cloud' (N, 6), 'frame_signals' (9,), and 'label'
 
         Returns:
-            List of processed data samples with 'new_x' field containing temporal format
+            List of processed data samples with 'new_x' (T, N, 6) and 'new_frame_signals' (T, 9) fields
         """
         if self.stacks is None:
             logging.info("No frame stacking configured, returning original data")
@@ -1638,11 +1501,13 @@ class MMRActionData(Dataset):
         logging.info(f"Starting frame stacking and padding process...")
         logging.info(f"Configuration: stacks={self.stacks}, sampling_rate={self.sampling_rate}, max_points={self.max_points}, padding={self.zero_padding}")
 
-        # take multiple frames for each x
-        xs = [d['x'] for d in data_list]
+        # take multiple frames for each point cloud
+        xs = [d['point_cloud'] for d in data_list]
+        fs = [d['frame_signals'] for d in data_list]
         # Extract action labels from the current data_list for label consistency checking
-        ys = [d['y'] for d in data_list]
-        padded_xs_temporal = []  # For temporal format (T, N, C)
+        ys = [d['label'] for d in data_list]
+        padded_xs_temporal = []       # For temporal format (T, N, 6)
+        padded_fs_temporal = []       # For frame signals (T, 9)
 
         logging.info(f"Processing {len(xs)} data samples with temporal stacking...")
         logging.info(f"Label distribution: {len(set(ys))} unique actions in current batch")
@@ -1656,6 +1521,7 @@ class MMRActionData(Dataset):
             for i in range(len(xs)):
                 # Collect T frames separately for temporal structure
                 frames_temporal = []
+                frame_signals_temporal = []
 
                 for j in range(self.stacks):
                     frame_idx = i - j * self.sampling_rate
@@ -1665,25 +1531,30 @@ class MMRActionData(Dataset):
                         mydata_slice = np.pad(mydata_slice, ((0, max(diff, 0)), (0, 0)), 'constant')
                         mydata_slice = mydata_slice[np.random.choice(len(mydata_slice), self.max_points, replace=False)]
                         frames_temporal.insert(0, mydata_slice)  # Insert at beginning for temporal order
+                        frame_signals_temporal.insert(0, fs[frame_idx])
                         total_frames_processed += 1
                     else:
-                        frames_temporal.insert(0, np.zeros((self.max_points, 7)))
+                        frames_temporal.insert(0, np.zeros((self.max_points, 6)))
+                        frame_signals_temporal.insert(0, np.zeros(9))
                         zero_frames_added += 1
 
-                # Create temporal format: (T, N, C) where T=stacks, N=max_points, C=7
-                temporal_stack = np.stack(frames_temporal, axis=0)  # (T, N, 7)
+                # Create temporal format: (T, N, 6) and frame signals (T, 9)
+                temporal_stack = np.stack(frames_temporal, axis=0)          # (T, N, 6)
+                fs_stack = np.stack(frame_signals_temporal, axis=0)         # (T, 9)
                 padded_xs_temporal.append(temporal_stack)
+                padded_fs_temporal.append(fs_stack)
 
                 pbar.update(1)
 
             logging.info(f"Per-data-point stacking completed: {total_frames_processed} real frames, {zero_frames_added} zero-padded frames")
-            logging.info(f"Stored temporal format (T={self.stacks}, N={self.max_points}, C=7)")
+            logging.info(f"Stored temporal format (T={self.stacks}, N={self.max_points}, C=6), frame signals (T={self.stacks}, 9)")
         elif self.zero_padding in ['per_stack', 'stack']:
             logging.info("Using per-stack padding strategy (storing temporal format only)")
 
             for i in range(len(xs)):
                 # Collect frames separately
                 frames_temporal = []
+                frame_signals_temporal = []
 
                 for j in range(self.stacks):
                     frame_idx = i - j * self.sampling_rate
@@ -1697,13 +1568,17 @@ class MMRActionData(Dataset):
                             # Select max_points using random sampling or density-based
                             frame_data = self._select_points_by_density(frame_data, self.max_points)
                         frames_temporal.insert(0, frame_data)
+                        frame_signals_temporal.insert(0, fs[frame_idx])
                     else:
                         # Zero padding for missing frames
-                        frames_temporal.insert(0, np.zeros((self.max_points, 7)))
+                        frames_temporal.insert(0, np.zeros((self.max_points, 6)))
+                        frame_signals_temporal.insert(0, np.zeros(9))
 
-                # Create temporal format: (T, N, C)
-                temporal_stack = np.stack(frames_temporal, axis=0)  # (T, N, 7)
+                # Create temporal format: (T, N, 6) and frame signals (T, 9)
+                temporal_stack = np.stack(frames_temporal, axis=0)   # (T, N, 6)
+                fs_stack = np.stack(frame_signals_temporal, axis=0)  # (T, 9)
                 padded_xs_temporal.append(temporal_stack)
+                padded_fs_temporal.append(fs_stack)
 
                 pbar.update(1)
 
@@ -1715,10 +1590,13 @@ class MMRActionData(Dataset):
 
         pbar.close()
         logging.info("✓ Frame stacking and padding completed successfully")
-        logging.info(f"  Stored format: ({self.stacks}, {self.max_points}, 7) per sample (temporal)")
+        logging.info(f"  Stored format: ({self.stacks}, {self.max_points}, 6) per sample (temporal)")
         logging.info(f"  Concatenated format will be generated on-the-fly when use_temporal_format=False")
 
-        # remap temporal format to data_list - ONLY store temporal format
-        new_data_list = [{**d, 'new_x': x_temp} for d, x_temp in zip(data_list, padded_xs_temporal)]
+        # remap temporal format to data_list - store both temporal point cloud and frame signals
+        new_data_list = [
+            {**d, 'new_x': x_temp, 'new_frame_signals': fs_temp}
+            for d, x_temp, fs_temp in zip(data_list, padded_xs_temporal, padded_fs_temporal)
+        ]
         logging.info(f"Created {len(new_data_list)} samples with temporal format")
         return new_data_list
