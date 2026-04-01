@@ -167,6 +167,15 @@ class Main:
         ('-model_k', '--model_k'): {
             'type': int, 'default': None, 'help': 'k-NN parameter for graph construction.',
         },
+        ('-model_no_frame_conditioning', '--model_no_frame_conditioning'): {
+            'action': 'store_true', 'help': 'Disable frame-level cross-modal attention conditioning (dgcnn_mmc_t ablation).',
+        },
+        ('-model_point_aux_dim', '--model_point_aux_dim'): {
+            'type': int, 'default': None, 'help': 'Number of point-level auxiliary channels for dgcnn_mmc_t (default 3: Doppler, SNR, Density).',
+        },
+        ('-model_frame_aux_dim', '--model_frame_aux_dim'): {
+            'type': int, 'default': None, 'help': 'Number of frame-level auxiliary channels for dgcnn_mmc_t (default 9: acc+gyro+BLE).',
+        },
 
     }
 
@@ -316,6 +325,14 @@ class Main:
             model_kwargs['use_temporal_pos_embed'] = False
         elif a.model_use_temporal_pos_embed:
             model_kwargs['use_temporal_pos_embed'] = True
+
+        # dgcnn_mmc_t specific flags
+        if a.model_no_frame_conditioning:
+            model_kwargs['use_frame_conditioning'] = False
+        if a.model_point_aux_dim is not None:
+            model_kwargs['point_aux_dim'] = a.model_point_aux_dim
+        if a.model_frame_aux_dim is not None:
+            model_kwargs['frame_aux_dim'] = a.model_frame_aux_dim
 
         model = model_cls(**model_kwargs)
 

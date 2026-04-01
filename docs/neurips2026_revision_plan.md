@@ -1,4 +1,4 @@
-# NeurIPS 2026 Revision Plan: DGCNN-AFTNet v2
+# NeurIPS 2026 Revision Plan: DGCNN-MMC-T (Multi-Modal Conditioning + Temporal)
 
 Based on ICML 2026 reviews (Submission #13311, scores: 2/3/3/2). Target: NeurIPS 2026.
 
@@ -72,33 +72,40 @@ h'_ij = gamma * MLP_geom(e_geom) + beta
 
 **Rationale:** Point-level signals (Doppler, SNR, Density) vary per-point and naturally condition edge-level geometric reasoning. FiLM is lightweight and proven effective for this granularity.
 
-### 3.2 Frame-level conditioning: AttnRes-style cross-modal attention (NEW)
+### 3.2 Frame-level conditioning: Cross-modal attention (NEW)
 
-After global max-pooling produces frame embeddings `E_t ∈ R^D`, condition them on IMU+BLE using depth-selective attention inspired by Attention Residuals (Kimi Team, 2026).
+After global max-pooling produces frame embeddings `E_t ∈ R^D`, condition them on IMU+BLE via cross-modal attention where the radar representation queries the auxiliary signals.
 
-**Design:**
+**Why cross-attention (not FiLM) for frame-level?**
+FiLM is correct at the point level because Doppler/SNR/Density are *co-located* with each point — the modulation is local and direct. IMU and BLE are foreign-modality signals that describe the subject's global state. The right operation is content-dependent lookup: "given what the radar captured this frame, which aspects of the subject's motion/position are relevant?" This selective query-based integration is what attention is designed for. FiLM would impose a fixed scale+shift regardless of what the radar captured.
 
-Process frame-level auxiliary signals through a small MLP stack to produce multi-level representations:
+**Why not cross-attention at the point level too?**
+Point-level signals (Doppler, SNR, Density) vary per-point and are physically co-located with each radar reflection — there is no selection problem, the relationship is direct and local. Cross-attention at that granularity would be unnecessarily expressive and would lose the physical co-location inductive bias.
+
+**Design (lightweight single-head cross-attention):**
+
 ```
-a0 = [IMU_t, BLE_t]   ∈ R^9       # raw signals
-a1 = MLP_1(a0)        ∈ R^D_aux   # first-level features
-a2 = MLP_2(a1)        ∈ R^D_aux   # second-level features
+# Normalize frame signals (handles scale mismatch: acc ≈ m/s², gyro ≈ rad/s, BLE ≈ dBm)
+s_t = LayerNorm(frame_signals_t)              # (B, T, 9)
+
+# Project to small cross-attention space
+q_t = W_q(E_t)                               # (B, T, d_ca)  radar queries
+k_t = W_k(s_t)                               # (B, T, d_ca)  aux keys
+v_t = W_v(s_t)                               # (B, T, d_ca)  aux values
+
+# Single-head scaled dot-product attention (per frame, not across time)
+alpha_t = softmax(q_t * k_t / sqrt(d_ca))    # (B, T, d_ca) — element-wise, lightweight
+ctx_t   = alpha_t * v_t                      # (B, T, d_ca)
+
+# Project back and residual connection
+E'_t = E_t + W_o(ctx_t)                      # (B, T, D)
 ```
 
-Apply AttnRes-style selective aggregation — the frame embedding generates a query that attends over auxiliary representations at different depth levels:
-```
-q_t = W_q · E_t                                           # (D_aux,)
-K = RMSNorm(stack([a0', a1, a2]))                         # (3, D_aux)  [a0' = Linear(a0) to project to D_aux]
-alpha = softmax(q_t^T · K / sqrt(D_aux))                  # (3,)
-aux_context = sum(alpha_i * V_i)                           # (D_aux,)
-E'_t = E_t + W_o(aux_context)                             # residual connection
-```
+`d_ca = 64` (small projection to keep it lightweight given 9-dim input).
 
-**Rationale:** Inspired by AttnRes's insight that fixed-weight aggregation (analogous to simple concatenation or FiLM) uniformly mixes all representation levels, while learned attention allows selective retrieval. The spatial representation decides at each frame whether it needs raw sensor readings (a0), low-level processed features (a1), or higher-level abstractions (a2). This is the depth-wise analog applied to cross-modal conditioning.
+**Ablation flags:** `use_frame_conditioning` (disables cross-attention entirely) and `use_film_modulation` (disables point-level FiLM) are independent — enabling full 2x2 ablation.
 
-**Why not FiLM for frame-level?** FiLM produces a single scale+shift — appropriate for point-level where the conditioning signal is local and varies per-edge. Frame-level signals are global context that should be selectively integrated based on what the spatial representation already captured. Attention-based selection is more expressive for this purpose.
-
-**Why not simple cross-attention?** Simple cross-attention over a single auxiliary representation is a special case (depth=1). AttnRes-style multi-level attention over the MLP stack gives the model access to different abstraction levels of the auxiliary signal, and the learned query naturally selects the right level.
+**Reviewer defense:** "FiLM is appropriate at the point level because the conditioning signal is co-located and the relationship is direct. Cross-attention is appropriate at the frame level because IMU and BLE are foreign-modality context signals — the content-dependence of attention is necessary when the conditioning signal comes from a different physical sensor."
 
 ### 3.3 Full revised forward pass
 
@@ -233,9 +240,9 @@ This table directly shows why AttnRes-style conditioning is better than simpler 
 
 ### Framing
 - **Drop:** "modality-agnostic" as main framing → replace with "multi-granularity auxiliary conditioning"
-- **New narrative:** Two-tier conditioning framework: point-level FiLM for per-point sensor attributes + frame-level AttnRes-inspired attention for subject-level wearable/environmental signals
-- **Contribution shift:** From "FiLM on radar aux" to "a unified framework that handles auxiliary signals at both point and frame granularities, demonstrated across radar, inertial, and RF modalities"
-
+- **New narrative:** Two-tier conditioning framework: point-level FiLM for co-located per-point radar attributes + frame-level cross-modal attention for subject-level wearable/environmental signals (IMU, BLE)
+- **Contribution shift:** From "FiLM on radar aux" to "a principled two-level conditioning hierarchy — FiLM where signals are co-located and local, cross-attention where signals are foreign-modality and global"
+- **Model name:** DGCNN-MMC-T (Multi-Modal Conditioning + Temporal)
 ### Zone discussion
 - Remove zone from auxiliary features and all experiments
 - Add to limitations: "Our evaluation is conducted in a single simulated room. Future work should investigate learned spatial context representations and cross-environment generalization."
@@ -271,11 +278,12 @@ This table directly shows why AttnRes-style conditioning is better than simpler 
 6. Generate new processed data files
 
 ### Phase 2: Model architecture
-7. Create new model file `dgcnn_aux_fusion_t_v2.py` (or modify existing)
-8. Add frame-level AttnRes conditioning module after global max pool
-9. Add ablation flags: `use_frame_attnres`, `frame_aux_dim`, individual feature toggles
-10. Register new model in `mmrnet/models/__init__.py`
+7. Create new model file `dgcnn_mmc_t.py` (Multi-Modal Conditioning + Temporal)
+8. Add frame-level cross-modal attention module (FrameCrossAttn) after global max pool
+9. Add ablation flags: `use_frame_conditioning` (frame-level cross-attn), `use_film_modulation` (point-level FiLM) — independent 2x2 ablation
+10. Register as `dgcnn_mmc_t` in `mmrnet/models/__init__.py`
 11. Update CLI argument parsing in `mmrnet/cli.py` for new flags
+12. Keep `dgcnn_aux_fusion_t` unchanged for backward compatibility with existing checkpoints
 
 ### Phase 3: Baselines
 12. Modify baseline models to accept 15D input (broadcast frame-level to points)

@@ -15,6 +15,7 @@ from .dgcnn_aux import DGCNN_Aux
 from .point_transformer_aux import PointTransformer_Aux
 from .pointnet_aux import PointNet_Aux
 from .dgcnn_aux_fusion_t import DGCNNAuxFusionT
+from .dgcnn_mmc_t import DGCNNMultiModalCondT
 from .dgcnn_aux_fusion_stattn import DGCNNAuxFusion_STAttn
 from .pointnext import PointNext
 from .pointnext_aux import PointNext_Aux
@@ -45,6 +46,7 @@ model_map = {
     'pointtransformer_aux': PointTransformer_Aux,
     'pointnet_aux': PointNet_Aux,
     'dgcnn_aux_fusion_t': DGCNNAuxFusionT,
+    'dgcnn_mmc_t': DGCNNMultiModalCondT,
     'dgcnn_aux_fusion_stattn': DGCNNAuxFusion_STAttn,
     'pointnext': PointNext,
     'pointnext_aux': PointNext_Aux,

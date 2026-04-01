@@ -127,6 +127,12 @@ def generate_slurm_script(args_dict, checkpoint_dir, output_file):
         model_args += " \\\n    --model_no_film_modulation"
     if args_dict.get('model_no_temporal_pos_embed', False):
         model_args += " \\\n    --model_no_temporal_pos_embed"
+    if args_dict.get('model_no_frame_conditioning', False):
+        model_args += " \\\n    --model_no_frame_conditioning"
+    if args_dict.get('model_point_aux_dim') is not None:
+        model_args += f" \\\n    --model_point_aux_dim {args_dict['model_point_aux_dim']}"
+    if args_dict.get('model_frame_aux_dim') is not None:
+        model_args += f" \\\n    --model_frame_aux_dim {args_dict['model_frame_aux_dim']}"
 
     # Build test/explainability flags (only for test mode)
     test_flags = ""
@@ -340,6 +346,12 @@ Examples:
                         help='Disable FiLM modulation (w/o Auxiliary Modulation ablation)')
     parser.add_argument('--model-no-temporal-pos-embed', action='store_true',
                         help='Disable temporal positional embeddings (w/o Learnable Pos. Embed ablation)')
+    parser.add_argument('--model-no-frame-conditioning', action='store_true',
+                        help='Disable frame-level cross-modal attention (dgcnn_mmc_t ablation)')
+    parser.add_argument('--model-point-aux-dim', type=str, default=None, action=MultiNumericAction, value_type=int,
+                        help='Point-level auxiliary channels for dgcnn_mmc_t (default 3: Doppler, SNR, Density)')
+    parser.add_argument('--model-frame-aux-dim', type=str, default=None, action=MultiNumericAction, value_type=int,
+                        help='Frame-level auxiliary channels for dgcnn_mmc_t (default 9: acc+gyro+BLE)')
 
     # Directory parameters
     parser.add_argument('--checkpoint-base', type=str, default='/cluster/projects/kite/koorosh/Output/MiliPointCareLab/checkpoints',
@@ -518,6 +530,9 @@ Examples:
             'model_k': combo[param_names.index('model_k')],
             'model_no_film_modulation': args.model_no_film_modulation,
             'model_no_temporal_pos_embed': args.model_no_temporal_pos_embed,
+            'model_no_frame_conditioning': args.model_no_frame_conditioning,
+            'model_point_aux_dim': args.model_point_aux_dim,
+            'model_frame_aux_dim': args.model_frame_aux_dim,
             # Test/Explainability parameters
             'visualize': args.visualize,
             'explainability': args.explainability,
