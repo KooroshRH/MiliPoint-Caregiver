@@ -171,7 +171,7 @@ class MMRKeypointData(Dataset):
 
     @property
     def raw_file_names(self):
-        if "carelab" in self.raw_data_path:
+        if "carelab" in self.raw_data_path.lower():
             file_names = [f for f in os.listdir(self.raw_data_path) if f.endswith('.pkl')]
             return [f'{self.raw_data_path}/{f}' for f in file_names]
         else:
@@ -501,7 +501,7 @@ class MMRIdentificationData(Dataset):
 
     @property
     def raw_file_names(self):
-        if "carelab" in self.raw_data_path:
+        if "carelab" in self.raw_data_path.lower():
             file_names = [f for f in os.listdir(self.raw_data_path) if f.endswith('.pkl')]
             return [f'{self.raw_data_path}/{f}' for f in file_names]
         else:
@@ -828,7 +828,7 @@ class MMRActionData(Dataset):
         self.partition = partition
 
         # Initialize action labels based on dataset type
-        if "carelab" in self.raw_data_path:
+        if "carelab" in self.raw_data_path.lower():
             self.action_label = []  # Will be populated during processing
         else:
             # Load pre-computed action labels for non-carelab datasets
@@ -947,7 +947,7 @@ class MMRActionData(Dataset):
         self.target_dtype = torch.int64  # Integer labels for classification
 
         # Determine number of classes based on dataset type
-        if "carelab" in self.raw_data_path:
+        if "carelab" in self.raw_data_path.lower():
             num_classes = 30  # Fixed number for carelab dataset
         else:
             num_classes = len(np.unique(self.action_label))-1 # Exclude -1 (invalid) labels
@@ -1246,7 +1246,7 @@ class MMRActionData(Dataset):
 
     @property
     def raw_file_names(self):
-        if "carelab" in self.raw_data_path:
+        if "carelab" in self.raw_data_path.lower():
             file_names = [f for f in os.listdir(self.raw_data_path) if f.endswith('.pkl')]
             return [f'{self.raw_data_path}/{f}' for f in file_names]
         else:
@@ -1353,7 +1353,7 @@ class MMRActionData(Dataset):
             samples_before = len(group_data)
 
             # Map action labels to class indices
-            if "carelab" in self.raw_data_path:
+            if "carelab" in self.raw_data_path.lower():
                 valid_mappings = 0
                 for data in group_data:
                     if data['label'] != -1:
