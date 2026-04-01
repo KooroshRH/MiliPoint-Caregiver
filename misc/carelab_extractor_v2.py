@@ -46,7 +46,7 @@ def load_imu_csv(csv_path):
     """
     raw_rows = []
     with open(csv_path, 'r', encoding='utf-8', errors='replace') as f:
-        reader = csv.reader(f)
+        reader = csv.reader(line.replace('\x00', '') for line in f)
         next(reader)  # skip header
         for row in reader:
             if len(row) < 4:
@@ -103,7 +103,7 @@ def load_ble_csv(csv_path):
     ts_order = []            # preserve insertion order of timestamps
 
     with open(csv_path, 'r', encoding='utf-8', errors='replace') as f:
-        reader = csv.reader(f)
+        reader = csv.reader(line.replace('\x00', '') for line in f)
         next(reader)  # skip header
         for row in reader:
             if len(row) < 3:
