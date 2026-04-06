@@ -379,6 +379,8 @@ Examples:
                         help='Memory allocation')
     parser.add_argument('--cpus', type=int, default=4,
                         help='Number of CPUs')
+    parser.add_argument('--begin', type=str, default=None,
+                        help='Defer job start (e.g. now+4hours, now+30minutes, 2026-04-10T14:00:00)')
     parser.add_argument('--mail-user', type=str, default='korosh.roohi9731@gmail.com',
                         help='Email for notifications')
     parser.add_argument('--mail-type', type=str, default='FAIL',
@@ -515,6 +517,7 @@ Examples:
             'cpus': args.cpus,
             'mail_user': args.mail_user,
             'mail_type': args.mail_type,
+            'begin': args.begin,
             'module': args.module,
             'venv': args.venv,
             'wandb_mode': args.wandb_mode,
