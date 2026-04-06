@@ -94,26 +94,39 @@ class FrameCrossAttn(nn.Module):
     Lightweight single-head cross-modal attention for frame-level conditioning.
 
     The radar frame embedding queries the auxiliary (IMU+BLE) signals to
-    selectively retrieve relevant context. A LayerNorm on the input handles
-    the scale mismatch across sensor modalities (acc ~m/s², gyro ~rad/s,
-    BLE ~dBm).
+    selectively retrieve relevant context.
+
+    Scale mismatch is severe across modalities (acc ~±4, gyro ~±2000, BLE ~-120..0),
+    so each modality is normalised independently before projection. A single
+    LayerNorm(9) would let gyro variance dominate and suppress acc and BLE.
 
     Operates independently per frame (no cross-time interaction — the temporal
     Transformer handles that).
 
-      s   = LayerNorm(frame_signals)           (B, T, frame_aux_dim)
+      acc_n, gyro_n, ble_n = LayerNorm(acc), LayerNorm(gyro), LayerNorm(ble)
+      s   = concat(acc_n, gyro_n, ble_n)      (B, T, frame_aux_dim)
       q   = W_q(E)                             (B, T, d_ca)
       k   = W_k(s)                             (B, T, d_ca)
       v   = W_v(s)                             (B, T, d_ca)
-      ctx = softmax(q*k / sqrt(d_ca)) * v      (B, T, d_ca)  element-wise
+      ctx = sigmoid(q*k / sqrt(d_ca)) * v      (B, T, d_ca)  element-wise gate
       E'  = E + W_o(ctx)                       (B, T, D)     residual
     """
-    def __init__(self, radar_dim, frame_aux_dim, d_ca=64):
+    def __init__(self, radar_dim, frame_aux_dim=9, d_ca=64, modality_dims=(3, 3, 3)):
+        """
+        modality_dims: tuple of ints, one per modality, must sum to frame_aux_dim.
+                       Each modality gets its own LayerNorm.
+                       Default (3,3,3) = acc, gyro, ble.
+                       Use (3,3) for gyro+ble only (frame_aux_dim=6).
+        """
         super().__init__()
         self.d_ca = d_ca
         self.scale = d_ca ** -0.5
+        self.modality_dims = modality_dims
+        assert sum(modality_dims) == frame_aux_dim, \
+            f"modality_dims {modality_dims} must sum to frame_aux_dim {frame_aux_dim}"
 
-        self.norm = nn.LayerNorm(frame_aux_dim)
+        # One LayerNorm per modality — independent scale normalisation
+        self.modality_norms = nn.ModuleList([nn.LayerNorm(d) for d in modality_dims])
 
         self.W_q = nn.Linear(radar_dim, d_ca, bias=False)
         self.W_k = nn.Linear(frame_aux_dim, d_ca, bias=False)
@@ -129,7 +142,10 @@ class FrameCrossAttn(nn.Module):
         frame_signals : (B, T, frame_aux_dim)
         returns       : (B, T, radar_dim)
         """
-        s = self.norm(frame_signals)        # (B, T, frame_aux_dim)
+        # Normalise each modality independently to equalise scales
+        chunks = torch.split(frame_signals, self.modality_dims, dim=-1)
+        normed = [norm(chunk) for norm, chunk in zip(self.modality_norms, chunks)]
+        s = torch.cat(normed, dim=-1)     # (B, T, frame_aux_dim)
 
         q = self.W_q(E)                     # (B, T, d_ca)
         k = self.W_k(s)                     # (B, T, d_ca)
@@ -170,6 +186,7 @@ class DGCNNMultiModalCondT(nn.Module):
                  dense_layers=(1024, 1024, 256, 128),
                  point_aux_dim=3,        # Doppler, SNR, Density
                  frame_aux_dim=9,        # acc(3) + gyro(3) + BLE(3)
+                 frame_modality_dims=(3, 3, 3),  # one entry per modality in frame_signals
                  geom_dim=3,             # XYZ
                  d_ca=64,                # cross-attention projection dim
                  temporal_layers=1,
@@ -183,6 +200,7 @@ class DGCNNMultiModalCondT(nn.Module):
         self.geom_dim = geom_dim
         self.point_aux_dim = point_aux_dim
         self.frame_aux_dim = frame_aux_dim
+        self.frame_modality_dims = frame_modality_dims
         self.use_film_modulation = use_film_modulation
         self.use_frame_conditioning = use_frame_conditioning
         self.use_temporal_pos_embed = use_temporal_pos_embed
@@ -213,6 +231,7 @@ class DGCNNMultiModalCondT(nn.Module):
                 radar_dim=self.temporal_dim,
                 frame_aux_dim=frame_aux_dim,
                 d_ca=d_ca,
+                modality_dims=frame_modality_dims,
             )
         else:
             self.frame_cross_attn = None
@@ -278,7 +297,8 @@ class DGCNNMultiModalCondT(nn.Module):
 
         # Frame-level cross-modal conditioning
         if self.frame_cross_attn is not None:
-            E = self.frame_cross_attn(E, frame_signals)   # (B, T, temporal_dim)
+            fs = frame_signals[..., :self.frame_aux_dim]    # (B, T, frame_aux_dim)
+            E = self.frame_cross_attn(E, fs)                # (B, T, temporal_dim)
 
         # Temporal positional embeddings + Transformer
         if self.temporal_encoder is not None:
