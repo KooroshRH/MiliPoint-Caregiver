@@ -414,7 +414,7 @@ class Main:
             test_dataset = None
             logging.info("✓ Model and data loaded")
 
-        load_path = a.load_name if a.load_name.endswith(".ckpt") else 'checkpoints/' + a.load_name + '/'
+        load_path = a.load_name if a.load_name.endswith(".ckpt") else a.load_name + '/'
 
         plt_trainer_args = {
             'devices': a.num_devices,
