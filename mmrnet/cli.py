@@ -367,7 +367,7 @@ class Main:
             'learning_rate': learning_rate,
             "plt_trainer_args": plt_trainer_args,
             "weight_decay": weight_decay,
-            "save_path":  'checkpoints/' +a.save_name,
+            "save_path": a.save_name,
         }
         loss = train(**train_params)
         return loss
