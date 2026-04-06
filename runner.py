@@ -319,8 +319,8 @@ Examples:
                         help='Maximum number of points (comma-separated for grid search)')
     parser.add_argument('--subject-id', type=str, default='20', action=MultiNumericAction, value_type=int,
                         help='Subject ID (comma-separated for grid search)')
-    parser.add_argument('--use-temporal-format', action='store_true',
-                        help='Use temporal format (T, N, C) instead of concatenated format (T*N, C) - required for temporal models like DGCNNAuxFusionT')
+    parser.add_argument('--use-temporal-format', action='store_true', default=True,
+                        help='Use temporal format (T, N, C) — always on, all models handle flattening internally')
 
     # Training parameters - with grid search support
     parser.add_argument('-opt', '--optimizer', type=str, default='adam', action=MultiValueAction,
