@@ -87,7 +87,7 @@ def create_output_paths(args_dict):
 
     # Build comprehensive experiment name with all important parameters
     exp_name = (f"{args_dict['model']}_{args_dict['task']}_"
-                f"seed{args_dict['seed']}_stack{args_dict['stacks']}_"
+                f"seed{args_dict['seed']}_stack{args_dict['stacks']}_srate{args_dict['sampling_rate']}_"
                 f"{args_dict['cross_validation']}_{cv_info}_"
                 f"opt{args_dict['optimizer']}_lr{args_dict['learning_rate']}_"
                 f"bs{args_dict['batch_size']}_ep{args_dict['max_epochs']}_"
@@ -380,7 +380,7 @@ Examples:
                         help='Number of CPUs')
     parser.add_argument('--mail-user', type=str, default='korosh.roohi9731@gmail.com',
                         help='Email for notifications')
-    parser.add_argument('--mail-type', type=str, default='ALL',
+    parser.add_argument('--mail-type', type=str, default='FAIL',
                         help='Email notification types')
     parser.add_argument('--gpu-constraint', type=str, default=None,
                         help='GPU constraint (e.g., gpu32g for 32GB GPU). Auto-set for deepgcn/pointmlp if not specified')
