@@ -192,6 +192,7 @@ def generate_slurm_script(args_dict, checkpoint_dir, output_file):
             gpu_constraint = "\n#SBATCH -C gpu32g"
 
     # Generate SLURM script
+    begin_line = f"\n#SBATCH --begin={args_dict['begin']}" if args_dict.get('begin') else ""
     slurm_script = f"""#!/bin/bash
 
 #SBATCH -A {args_dict['account']}
@@ -203,7 +204,7 @@ def generate_slurm_script(args_dict, checkpoint_dir, output_file):
 #SBATCH --mem {args_dict['mem']}
 #SBATCH -c {args_dict['cpus']}
 #SBATCH --mail-user {args_dict['mail_user']}
-#SBATCH --mail-type {args_dict['mail_type']}{gpu_constraint}
+#SBATCH --mail-type {args_dict['mail_type']}{gpu_constraint}{begin_line}
 
 TMP=~/tmp
 TMPDIR=~/tmp
