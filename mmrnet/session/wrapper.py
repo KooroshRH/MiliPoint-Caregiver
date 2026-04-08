@@ -78,7 +78,10 @@ class ModelWrapper(pl.LightningModule):
 
         # Store sample input for FLOPs calculation (only first batch)
         if self.sample_input is None:
-            self.sample_input = x[0:1].detach().clone()  # Keep one sample
+            if isinstance(x, (tuple, list)):
+                self.sample_input = tuple(xi[0:1].detach().clone() for xi in x)
+            else:
+                self.sample_input = x[0:1].detach().clone()
 
         # Measure inference time
         start_time = time.time()
@@ -88,7 +91,8 @@ class ModelWrapper(pl.LightningModule):
 
         # Store timing information
         self.test_times.append(end_time - start_time)
-        self.test_batch_sizes.append(x.shape[0])
+        batch_size = x[0].shape[0] if isinstance(x, (tuple, list)) else x.shape[0]
+        self.test_batch_sizes.append(batch_size)
 
         loss = self.loss(y_hat, y)
         metric = self.metric(y_hat, y)
@@ -100,7 +104,7 @@ class ModelWrapper(pl.LightningModule):
         if self.metric_name == 'acc':
             # compute top-3
             top3 = torch.topk(y_hat, 3, dim=1)[1]
-            top3_acc = (top3 == y.unsqueeze(-1)).float().sum()/x.shape[0]
+            top3_acc = (top3 == y.unsqueeze(-1)).float().sum()/batch_size
             
             self.log_dict(
                 {
