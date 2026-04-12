@@ -12,6 +12,7 @@ from .pointnet_film import PointNetWithFiLM
 from .pointnet_film_density import PointNetWithFiLMDensity
 from .aux_former import AuxFormer
 from .dgcnn_aux import DGCNN_Aux
+from .dgcnn_aux_t import DGCNN_Aux_T
 from .point_transformer_aux import PointTransformer_Aux
 from .pointnet_aux import PointNet_Aux
 from .dgcnn_aux_fusion_t import DGCNNAuxFusionT
@@ -44,6 +45,7 @@ model_map = {
     'pointnet-film-density': PointNetWithFiLMDensity,
     'aux_former': AuxFormer,
     'dgcnn_aux': DGCNN_Aux,
+    'dgcnn_aux_t': DGCNN_Aux_T,
     'pointtransformer_aux': PointTransformer_Aux,
     'pointnet_aux': PointNet_Aux,
     'dgcnn_aux_fusion_t': DGCNNAuxFusionT,
