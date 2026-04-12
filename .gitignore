@@ -11,3 +11,5 @@ lightning_logs/
 milenv/
 outputs.zip
 checkpoints/README.md
+results/confusion_matrices.pkl
+results/results_summary.csv
