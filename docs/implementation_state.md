@@ -241,18 +241,18 @@ All models must accept `(point_cloud, frame_signals), y` from the dataset.
 | `dgcnn_aux_fusion_t_v2` | Unpack tuple, ignore fs, 6D point-level FiLM | 6 |
 | `dgcnn_mmc_t` | Unpack tuple, 6D FiLM + 9D cross-attn | 6+9 |
 
-### ❌ Not yet updated (still expect single tensor)
-| Model | File | Input shape expected | Strategy needed |
-|-------|------|---------------------|-----------------|
-| `pointnet_aux` | `pointnet_aux.py` | `(B, N, C)` | Broadcast fs, concat → 15D, flatten T |
-| `pointnext_aux` | `pointnext_aux.py` | `(B, N, C)` | Broadcast fs, concat → 15D, flatten T |
-| `deepgcn_aux` | `deepgcn_aux.py` | `(B, N, C)` | Broadcast fs, concat → 15D, flatten T |
-| `point_transformer_aux` | `point_transformer_aux.py` | `(B, N, C)` | Broadcast fs, concat → 15D, flatten T |
-| `pointmlp_aux` | `pointmlp_aux.py` | `(B, N, C)` | Special — operates on `(B, N, C)` with internal grouping |
-| `point_transformer_v3_aux` | `point_transformer_v3_aux.py` | `(B, N, C)` | Broadcast fs, concat → 15D, flatten T |
-| `pointmamba_aux` | `pointmamba_aux.py` | `(B, N, C)` | Broadcast fs, concat → 15D, flatten T |
-| `mamba4d_aux` | `mamba4d_aux.py` | `(B, T, N, C)` | Broadcast fs per frame, concat → 15D, pass `(B, T, N, 15)` |
-| `mamba4d_aux_film` | `mamba4d_aux_film.py` | `(B, T, N, C)` | Same as mamba4d_aux |
+### ✅ Updated 2026-04-15 (all now compatible)
+| Model | File | Strategy |
+|-------|------|----------|
+| `pointnet_aux` | `pointnet_aux.py` | Broadcast fs → 15D, flatten `(B*T*N)`, mean-pool over T |
+| `pointnext_aux` | `pointnext_aux.py` | Broadcast fs → 15D, flatten `(B*T*N)`, mean-pool over T |
+| `deepgcn_aux` | `deepgcn_aux.py` | Broadcast fs → 15D, flatten `(B*T*N)`, mean-pool over T |
+| `point_transformer_aux` | `point_transformer_aux.py` | Broadcast fs → 15D, flatten `(B*T*N)`, mean-pool over T |
+| `pointmlp_aux` | `pointmlp_aux.py` | Special — flatten T into points: `(B, T*N, 15)` (no mean-pool, `self.points=T*N` unchanged) |
+| `point_transformer_v3_aux` | `point_transformer_v3_aux.py` | Broadcast fs → 15D, flatten `(B*T*N)`, mean-pool over T |
+| `pointmamba_aux` | `pointmamba_aux.py` | Broadcast fs → 15D, flatten `(B*T, N, 15)`, mean-pool over T |
+| `mamba4d_aux` | `mamba4d_aux.py` | Broadcast fs → `(B, T, N, 15)`, pass directly (native temporal) |
+| `mamba4d_aux_film` | `mamba4d_aux_film.py` | Same as mamba4d_aux; `aux_dim=3` (Doppler/SNR/Density cols 3:6) |
 
 **Standard update pattern for flat models (Group A):**
 ```python
@@ -322,8 +322,8 @@ Rebuild anytime: `python misc/collect_results.py`
 ## 7. Pending Work
 
 ### Immediate
-- [ ] Update remaining 9 aux models for new data format (see Section 5 — ❌ list)
-- [ ] Run full LOSO for updated baselines (after compatibility fix)
+- [x] Update remaining 9 aux models for new data format (done 2026-04-15)
+- [ ] Run full LOSO for updated baselines
 
 ### Experiments
 - [ ] Full ablation: disable FiLM only, disable frame CA only, disable both
