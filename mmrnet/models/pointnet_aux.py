@@ -35,7 +35,7 @@ class GlobalSAModule(torch.nn.Module):
         return x, pos, batch
 
 class PointNet_Aux(torch.nn.Module):
-    def __init__(self, info=None, in_channels=7):
+    def __init__(self, info=None, in_channels=15):
         super().__init__()
         self.num_classes = info['num_classes']
         self.in_channels = in_channels
@@ -57,22 +57,24 @@ class PointNet_Aux(torch.nn.Module):
             self.mlp = MLP([1024, 512, 256, self.num_classes], dropout=0.5, norm=None)
 
     def forward(self, data):
-        batchsize = data.shape[0]
-        npoints = data.shape[1]
+        point_cloud, frame_signals = data
+        # point_cloud   : (B, T, N, 6)
+        # frame_signals : (B, T, 9)
+        B, T, N, _ = point_cloud.shape
 
-        # Use all channels (xyz + auxiliary data)
-        x = data.reshape((batchsize * npoints, self.in_channels))
-        batch = torch.arange(batchsize).repeat_interleave(npoints).to(x.device)
+        fs = frame_signals.unsqueeze(2).expand(-1, -1, N, -1)   # (B, T, N, 9)
+        x = torch.cat([point_cloud, fs], dim=-1)                 # (B, T, N, 15)
+        x = x.reshape(B * T * N, self.in_channels)
+        batch = torch.arange(B * T, device=x.device).repeat_interleave(N)
 
-        # Extract position from first 3 channels (xyz coordinates)
         pos = x[:, :3]
-
-        # Initial input: use full feature vector (including xyz and aux)
         sa0_out = (x, pos, batch)
         sa1_out = self.sa1_module(*sa0_out)
         sa2_out = self.sa2_module(*sa1_out)
         sa3_out = self.sa3_module(*sa2_out)
-        x, pos, batch = sa3_out
+        x, pos, batch = sa3_out                  # x: (B*T, 1024)
+
+        x = x.view(B, T, -1).mean(dim=1)        # (B, 1024)
 
         if self.num_classes is None:
             y = []
