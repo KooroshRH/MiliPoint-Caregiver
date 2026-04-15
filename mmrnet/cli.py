@@ -353,7 +353,9 @@ class Main:
         plt_trainer_args = {
             'max_epochs': a.max_epochs, 'devices': a.num_devices,
             'accelerator': a.accelerator, 'strategy': a.strategy,
-            'fast_dev_run': a.debug,}
+            'fast_dev_run': a.debug,
+            'enable_progress_bar': False,
+            'log_every_n_steps': 50,}
         
         optimizer = a.optimizer if train_custom_args is None else train_custom_args.get('optimizer', a.optimizer)
         learning_rate = a.learning_rate if train_custom_args is None else train_custom_args.get('learning_rate', a.learning_rate)
@@ -418,7 +420,8 @@ class Main:
 
         plt_trainer_args = {
             'devices': a.num_devices,
-            'accelerator': a.accelerator, 'strategy': a.strategy,}
+            'accelerator': a.accelerator, 'strategy': a.strategy,
+            'enable_progress_bar': False,}
 
         # Define class names for the carelab dataset (30 actions)
         class_names = None
