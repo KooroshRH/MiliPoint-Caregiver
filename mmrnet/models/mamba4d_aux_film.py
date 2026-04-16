@@ -241,7 +241,7 @@ class Mamba4D_Aux_FiLM(nn.Module):
     def __init__(
         self,
         info=None,
-        in_channels=7,
+        in_channels=15,
         embed_dim=128,
         spatial_blocks=4,
         temporal_blocks=4,
@@ -251,7 +251,7 @@ class Mamba4D_Aux_FiLM(nn.Module):
         dropout=0.1,
         num_frames=40,
         points_per_frame=22,
-        aux_dim=4
+        aux_dim=3
     ):
         super().__init__()
 
@@ -305,32 +305,20 @@ class Mamba4D_Aux_FiLM(nn.Module):
             self.output = MLP([embed_dim, 256, 128, self.num_classes], dropout=0.5, norm=None)
 
     def forward(self, data):
-        """
-        Args:
-            data: (B, T, N, C) 4D point cloud video with auxiliary features
-                  or (B, T*N, C) flattened temporal data
-        Returns:
-            (B, num_classes) classification logits
-        """
-        # Handle different input formats
-        if data.dim() == 3:
-            B, TN, C = data.shape
-            T = self.num_frames
-            N = self.points_per_frame
-            if TN == T * N:
-                data = data.view(B, T, N, C)
-            else:
-                N = TN // T if TN % T == 0 else self.points_per_frame
-                T = TN // N
-                data = data.view(B, T, N, C)
-        else:
-            B, T, N, C = data.shape
+        point_cloud, frame_signals = data
+        # point_cloud   : (B, T, N, 6)   [X, Y, Z, Doppler, SNR, Density]
+        # frame_signals : (B, T, 9)       [acc(3), gyro(3), BLE(3)]
+        B, T, N, _ = point_cloud.shape
+
+        fs = frame_signals.unsqueeze(2).expand(-1, -1, N, -1)   # (B, T, N, 9)
+        data = torch.cat([point_cloud, fs], dim=-1)              # (B, T, N, 15)
+        B, T, N, C = data.shape
 
         device = data.device
 
-        # Extract XYZ and auxiliary features
-        xyz = data[:, :, :, :3]  # (B, T, N, 3)
-        aux = data[:, :, :, 3:3+self.aux_dim]  # (B, T, N, aux_dim)
+        # Extract XYZ and point-level aux features (Doppler, SNR, Density at cols 3:6)
+        xyz = data[:, :, :, :3]                                  # (B, T, N, 3)
+        aux = data[:, :, :, 3:3+self.aux_dim]                    # (B, T, N, 3)
 
         # Reshape for per-frame processing
         data_flat = data.reshape(B * T, N, self.in_channels)  # (B*T, N, C)

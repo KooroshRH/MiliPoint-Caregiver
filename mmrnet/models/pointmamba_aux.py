@@ -185,7 +185,7 @@ class PointMamba_Aux(nn.Module):
     def __init__(
         self,
         info=None,
-        in_channels=7,
+        in_channels=15,
         embed_dim=384,
         depth=12,
         num_patches=64,
@@ -241,41 +241,40 @@ class PointMamba_Aux(nn.Module):
             self.output = MLP([embed_dim, 256, 64, self.num_classes], dropout=0.5, norm=None)
 
     def forward(self, data):
-        """
-        Args:
-            data: (B, N, C) point cloud with auxiliary features
-        Returns:
-            (B, num_classes) classification logits
-        """
-        B, N, C = data.shape
-        device = data.device
+        point_cloud, frame_signals = data
+        # point_cloud   : (B, T, N, 6)
+        # frame_signals : (B, T, 9)
+        B, T, N, _ = point_cloud.shape
+        device = point_cloud.device
 
-        # Extract XYZ for positions
-        xyz = data[:, :, :3]
+        fs = frame_signals.unsqueeze(2).expand(-1, -1, N, -1)   # (B, T, N, 9)
+        x_in = torch.cat([point_cloud, fs], dim=-1)              # (B, T, N, 15)
 
-        # Reshape for patch embedding
-        xyz_flat = xyz.reshape(B * N, 3)
-        data_flat = data.reshape(B * N, C)
-        batch = torch.arange(B, device=device).repeat_interleave(N)
+        # Flatten T into batch: treat each frame as an independent sample
+        BT = B * T
+        x_in = x_in.reshape(BT, N, self.in_channels)            # (B*T, N, 15)
+
+        xyz = x_in[:, :, :3]
+        xyz_flat = xyz.reshape(BT * N, 3)
+        data_flat = x_in.reshape(BT * N, self.in_channels)
+        batch = torch.arange(BT, device=device).repeat_interleave(N)
 
         # Patch embedding (uses both xyz and auxiliary features)
         patch_tokens, patch_centers = self.patch_embed(xyz_flat, data_flat, batch)
 
-        # Apply space-filling curve ordering
+        # Apply space-filling curve ordering (loop now over B*T)
         tokens_h_list = []
         tokens_th_list = []
 
-        for b in range(B):
+        for b in range(BT):
             centers_b = patch_centers[b]
             tokens_b = patch_tokens[b]
 
-            # Hilbert order
             order_h = get_space_filling_order(centers_b, 'hilbert')
             tokens_h = tokens_b[order_h]
             tokens_h = self.order_indicator_h(tokens_h)
             tokens_h_list.append(tokens_h)
 
-            # Trans-Hilbert order
             order_th = get_space_filling_order(centers_b, 'trans_hilbert')
             tokens_th = tokens_b[order_th]
             tokens_th = self.order_indicator_th(tokens_th)
@@ -284,23 +283,19 @@ class PointMamba_Aux(nn.Module):
         tokens_h = torch.stack(tokens_h_list, dim=0)
         tokens_th = torch.stack(tokens_th_list, dim=0)
 
-        # Add positional embedding
         tokens_h = tokens_h + self.pos_embed
         tokens_th = tokens_th + self.pos_embed
 
-        # Concatenate bidirectional sequences
         tokens = torch.cat([tokens_h, tokens_th], dim=1)
 
-        # Mamba encoder
         for block in self.blocks:
             tokens = block(tokens)
 
         tokens = self.norm(tokens)
 
-        # Global pooling
-        x = tokens.mean(dim=1)
+        x = tokens.mean(dim=1)                  # (B*T, embed_dim)
+        x = x.view(B, T, -1).mean(dim=1)        # (B, embed_dim)
 
-        # Output head
         if self.num_classes is None:
             y = []
             for i in range(self.num_points):

@@ -75,7 +75,7 @@ class PointTransformer_Aux(torch.nn.Module):
             info=None,
             dim_model=[32, 64, 128, 256, 512],
             k=16,
-            in_channels=7):
+            in_channels=15):
         super().__init__()
         self.k = k
         self.in_channels = in_channels  # Changed from hardcoded 3 to accept full data
@@ -117,17 +117,18 @@ class PointTransformer_Aux(torch.nn.Module):
             self.mlp_output = MLP([dim_model[-1], 64, out_channels], norm=None)
 
     def forward(self, data):
-        batchsize = data.shape[0]
-        npoints = data.shape[1]
+        point_cloud, frame_signals = data
+        # point_cloud   : (B, T, N, 6)
+        # frame_signals : (B, T, 9)
+        B, T, N, _ = point_cloud.shape
 
-        # Use all channels (xyz + auxiliary data)
-        data_flat = data.reshape((batchsize * npoints, self.in_channels))
-        batch = torch.arange(batchsize).repeat_interleave(npoints).to(data.device)
+        fs = frame_signals.unsqueeze(2).expand(-1, -1, N, -1)   # (B, T, N, 9)
+        x_in = torch.cat([point_cloud, fs], dim=-1)              # (B, T, N, 15)
 
-        # Extract position from first 3 channels (xyz coordinates)
+        data_flat = x_in.reshape(B * T * N, self.in_channels)
+        batch = torch.arange(B * T, device=data_flat.device).repeat_interleave(N)
+
         pos = data_flat[:, :3]
-
-        # Use full data as features (including xyz and aux)
         x = data_flat
 
         # first block
@@ -138,12 +139,12 @@ class PointTransformer_Aux(torch.nn.Module):
         # backbone
         for i in range(len(self.transformers_down)):
             x, pos, batch = self.transition_down[i](x, pos, batch=batch)
-
             edge_index = knn_graph(pos, k=self.k, batch=batch)
             x = self.transformers_down[i](x, pos, edge_index)
 
         # GlobalAveragePooling
-        x = global_mean_pool(x, batch)
+        x = global_mean_pool(x, batch)           # (B*T, D)
+        x = x.view(B, T, -1).mean(dim=1)         # (B, D)
 
         if self.num_classes is None:
             y = []
@@ -151,7 +152,6 @@ class PointTransformer_Aux(torch.nn.Module):
                 y.append(self.mlp_output[f'branch_{i}'](x))
             y = torch.stack(y, dim=1)
             return y
-        # Class score
         out = self.mlp_output(x)
         return out
 

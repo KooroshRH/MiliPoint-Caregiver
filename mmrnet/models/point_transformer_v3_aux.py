@@ -207,7 +207,7 @@ class PointTransformerV3_Aux(nn.Module):
     def __init__(
         self,
         info=None,
-        in_channels=7,
+        in_channels=15,
         channels=[64, 128, 256, 512],
         depths=[2, 2, 6, 2],
         num_heads=[4, 8, 16, 32],
@@ -260,30 +260,28 @@ class PointTransformerV3_Aux(nn.Module):
             self.output = MLP([channels[-1], 256, 64, self.num_classes], dropout=0.5, norm=None)
 
     def forward(self, data):
-        batchsize = data.shape[0]
-        npoints = data.shape[1]
+        point_cloud, frame_signals = data
+        # point_cloud   : (B, T, N, 6)
+        # frame_signals : (B, T, 9)
+        B, T, N, _ = point_cloud.shape
 
-        # Reshape to (B*N, C) - use all channels
-        x = data.reshape(batchsize * npoints, self.in_channels)
+        fs = frame_signals.unsqueeze(2).expand(-1, -1, N, -1)   # (B, T, N, 9)
+        x_in = torch.cat([point_cloud, fs], dim=-1)              # (B, T, N, 15)
 
-        # Extract XYZ for position (first 3 channels)
+        x = x_in.reshape(B * T * N, self.in_channels)
         pos = x[:, :3].clone()
+        batch = torch.arange(B * T, device=x.device).repeat_interleave(N)
 
-        batch = torch.arange(batchsize, device=x.device).repeat_interleave(npoints)
-
-        # Input projection (uses all channels including auxiliary)
         x = self.input_proj(x)
 
-        # Encoder stages
         for i, stage in enumerate(self.stages):
             x, pos, batch = stage(x, pos, batch)
             if i < len(self.downsamples):
                 x, pos, batch = self.downsamples[i](x, pos, batch)
 
-        # Global pooling
-        x = global_mean_pool(x, batch)
+        x = global_mean_pool(x, batch)           # (B*T, channels[-1])
+        x = x.view(B, T, -1).mean(dim=1)         # (B, channels[-1])
 
-        # Output head
         if self.num_classes is None:
             y = []
             for i in range(self.num_points):

@@ -108,7 +108,7 @@ class DeepGCN_Aux(nn.Module):
     - Smaller k-NN neighborhood (9 instead of 16)
     - Gradient checkpointing support
     """
-    def __init__(self, info=None, in_channels=7, k=9, num_layers=7, channels=64, aggr='max'):
+    def __init__(self, info=None, in_channels=15, k=9, num_layers=7, channels=64, aggr='max'):
         super().__init__()
         self.num_classes = info['num_classes']
         self.in_channels = in_channels
@@ -151,44 +151,35 @@ class DeepGCN_Aux(nn.Module):
                             dropout=0.5, norm=None)
 
     def forward(self, data):
-        """
-        Args:
-            data: (B, N, C) where C = in_channels (XYZ + auxiliary)
-        Returns:
-            (B, num_classes) or (B, num_keypoints, 3)
-        """
-        batchsize = data.shape[0]
-        npoints = data.shape[1]
+        point_cloud, frame_signals = data
+        # point_cloud   : (B, T, N, 6)
+        # frame_signals : (B, T, 9)
+        B, T, N, _ = point_cloud.shape
 
-        # Reshape to (B*N, C)
-        x = data.reshape((batchsize * npoints, self.in_channels))
-        batch = torch.arange(batchsize).repeat_interleave(npoints).to(x.device)
+        fs = frame_signals.unsqueeze(2).expand(-1, -1, N, -1)   # (B, T, N, 9)
+        x = torch.cat([point_cloud, fs], dim=-1)                 # (B, T, N, 15)
+        x = x.reshape(B * T * N, self.in_channels)
+        batch = torch.arange(B * T, device=x.device).repeat_interleave(N)
 
-        # Extract position (first 3 channels for k-NN graph construction)
         pos = x[:, :3]
-
-        # Stem: project all features (including auxiliary) to feature space
         x = self.stem(x)
 
-        # Apply deep GCN layers
         for layer in self.layers:
             x = layer(x, pos, batch)
 
-        # Global pooling
         if self.global_pool_type == 'max':
             x = global_max_pool(x, batch)
         else:
-            x = global_mean_pool(x, batch)
+            x = global_mean_pool(x, batch)            # (B*T, channels)
 
-        # Output head
+        x = x.view(B, T, -1).mean(dim=1)              # (B, channels)
+
         if self.num_classes is None:
-            # Keypoint estimation
             y = []
             for i in range(self.num_points):
                 y.append(self.output[f'branch_{i}'](x))
             y = torch.stack(y, dim=1)
         else:
-            # Classification
             y = self.output(x)
 
         return y

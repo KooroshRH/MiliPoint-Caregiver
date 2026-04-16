@@ -211,7 +211,7 @@ class PointMLP_Aux(nn.Module):
     Input format: (B, N, C) where C = 7 (XYZ + 4 auxiliary channels)
     Output format: (B, num_classes) for classification or (B, num_keypoints, 3) for keypoint estimation
     """
-    def __init__(self, info, in_channels=7, embed_dim=64, groups=1, res_expansion=1,
+    def __init__(self, info, in_channels=15, embed_dim=64, groups=1, res_expansion=1,
                  activation="relu", bias=False, use_xyz=True, normalize="anchor",
                  dim_expansion=[2, 2, 2, 2], pre_blocks=[2, 2, 2, 2], pos_blocks=[2, 2, 2, 2],
                  k_neighbors=[12, 12, 12, 12], reducers=[2, 2, 2, 2], **kwargs):
@@ -279,18 +279,21 @@ class PointMLP_Aux(nn.Module):
             self.output = self.classifier(self.num_classes)
 
     def forward(self, data):
-        """
-        Args:
-            data: (B, N, C) where C = in_channels (XYZ + auxiliary)
-        Returns:
-            (B, num_classes) or (B, num_keypoints, 3)
-        """
-        # Input: (B, N, C) where C = 7 (XYZ + 4 auxiliary channels)
+        point_cloud, frame_signals = data
+        # point_cloud   : (B, T, N, 6)
+        # frame_signals : (B, T, 9)
+        B, T, N, _ = point_cloud.shape
+
+        fs = frame_signals.unsqueeze(2).expand(-1, -1, N, -1)   # (B, T, N, 9)
+        data = torch.cat([point_cloud, fs], dim=-1)              # (B, T, N, 15)
+        # Flatten T into point dimension — PointMLP works on the full T*N cloud
+        data = data.reshape(B, T * N, self.in_channels)          # (B, T*N, 15)
+
         # Extract XYZ for positions (first 3 channels)
-        xyz = data[:, :, :3]                    # b, n, 3
+        xyz = data[:, :, :3]                    # b, T*n, 3
 
         # Extract auxiliary features (remaining channels)
-        aux_features = data[:, :, 3:]           # b, n, aux_channels
+        aux_features = data[:, :, 3:]           # b, T*n, aux_channels
 
         # Embed auxiliary features
         x = aux_features.permute(0, 2, 1)       # b, aux_channels, n
