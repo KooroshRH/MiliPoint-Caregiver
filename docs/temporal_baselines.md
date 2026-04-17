@@ -16,11 +16,21 @@ This document captures:
 
 ## Common integration strategy in our repo
 
+### Registry / naming (avoid runner failures)
+- The only valid `--model` names are the keys in `mmrnet/models/__init__.py:model_map`.
+- Before submitting jobs for a newly-added baseline, list keys with:
+  - `python misc/list_registered_models.py`
+
 ### Where the model must land
 - Add an adapter model in `mmrnet/models/`, e.g. `mmrnet/models/p4transformer_adapter.py`
 - Register it in `mmrnet/models/__init__.py` `model_map` under a clear key
 - Ensure the adapter `forward(self, data)` accepts the tuple:
   - `point_cloud, frame_signals = data`
+
+### “Vendor vs port vs re-implement” decision rule
+- **Vendor (submodule/subtree)**: best when the repo has custom CUDA ops and a working training-time forward path we can reuse.
+- **Port (copy a small set of modules into `mmrnet/models/`)**: best when the model is pure PyTorch and self-contained.
+- **Re-implement**: best when the repo depends on TF1, or when the “idea” is clearer than the code, or the codebase is too invasive.
 
 ### What to feed these temporal models
 Most external temporal baselines expect **XYZ-only** sequences:
@@ -46,6 +56,13 @@ def forward(self, data):
 ```
 
 If the external model expects flattened `(B, T*N, 3)` or different layout, the adapter is responsible for reshaping/permuting only (no behavior changes).
+
+### Adapter contract (keep ports uniform)
+- **Input**: `data == (point_cloud, frame_signals)` where `point_cloud` is `(B,T,N,6)` and `frame_signals` is `(B,T,9)`
+- **Default baseline**: XYZ-only (`xyz = point_cloud[..., :3]`); ignore `frame_signals`
+- **Output**: logits `(B, num_classes)` (30 for our mmr_act task)
+- **Temporal reduction**: only if the external backbone outputs per-frame logits/features; use mean over \(T\) unless the method defines its own temporal head
+- **No hidden behavior changes**: adapters reshape/permutation + head replacement only; all architectural choices stay in the vendored/ported code
 
 ### Data/time conventions
 External repos often assume:
@@ -98,6 +115,11 @@ The repo uses custom CUDA ops (PointNet++-style FPS + radius search). From READM
 - Heavy reliance on PointNet++ CUDA kernels; cluster build toolchain must be aligned.
 - Hyperparameters from MSRAction3D (hundreds of points) won’t directly transfer to `N=22`.
 
+### Vendor plan (recommended)
+- **Approach**: git submodule under `external/P4Transformer/` pinned to a commit
+- **Build**: one-time compile of CUDA ops during environment setup (document exact CUDA/PyTorch combo)
+- **Integration surface**: adapter file + minimal head override; avoid editing vendored code unless required for import paths
+
 ---
 
 ## 2) PST-Transformer
@@ -133,6 +155,10 @@ Like P4Transformer, it uses PointNet++-style CUDA operators:
 ### Risks / gotchas
 - Same sparse-point issue (`N=22`) likely needs smaller neighborhoods / fewer tokens.
 - CUDA ops build requirements.
+
+### Vendor plan (recommended)
+- **Approach**: vendor alongside P4Transformer, reusing the same CUDA op toolchain where possible (shared `P4DConv` concept)
+- **Integration surface**: adapter + registry entry; keep external training scripts unmodified
 
 ---
 
@@ -178,6 +204,11 @@ From README, notable dependencies:
 ### Risks / gotchas
 - More dependencies than PST/P4 (PyTorch3D + custom module build).
 - Sparse `N=22` may need re-tuning patch/token sizes.
+
+### Vendor plan (recommended)
+- **Approach**: vendor repo (submodule/subtree) because it has multiple compiled deps
+- **Integration surface**: adapter that feeds `(B,T,N,3)`; set `num_classes=30`
+- **Pinned deps**: record exact versions (PyTorch/CUDA/PyTorch3D) used to build successfully
 
 ---
 
@@ -229,6 +260,10 @@ From README:
 - Heavier dependency surface (mamba + CUDA ops + KNN_CUDA).
 - Likely tuned for larger `N`; may require changing prompt-guided clustering / token count assumptions.
 
+### Vendor plan (recommended)
+- **Approach**: vendor repo, but try to share `P4DConv`/PointNet++ op builds with PST/P4 if feasible
+- **Integration surface**: adapter + head override; keep Mamba/SSM blocks untouched
+
 ---
 
 ## 6) 3DInAction (CVPR 2024)
@@ -264,6 +299,10 @@ Adapter:
 ### Note
 Their `models/PST_Transformer.py` expects input shaped `(B, T, 3, N)` then permutes to `(B, T, N, 3)`.
 Our adapter can supply `(B, T, N, 3)` directly and bypass that layout.
+
+### Vendor plan (recommended)
+- **Approach**: **port model-only** into `mmrnet/models/` if the dependency surface is small; otherwise vendor repo
+- **Integration surface**: keep our Lightning training loop; do not port their training pipeline
 
 ---
 
@@ -302,6 +341,10 @@ If re-implementing:
 ### Practical “compat” mapping (if we ever run their TF pipeline)
 - Convert our `(B, T, N, 3)` into `point_cloud_flat = (B, T*N, 3)` to match their placeholder shape.
 - But we would still need TF1 + custom ops, so this is mainly for reference.
+
+### Vendor plan (recommended)
+- **Approach**: **re-implement in PyTorch** (treat TF1 code as a reference only)
+- **Integration surface**: add a `kinet_like_*` model in `mmrnet/models/` that wraps an existing static backbone + dynamic ST-surface module
 
 ---
 
