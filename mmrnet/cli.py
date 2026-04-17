@@ -355,6 +355,9 @@ class Main:
             'accelerator': a.accelerator, 'strategy': a.strategy,
             'fast_dev_run': a.debug,
             'enable_progress_bar': False,
+            # Prevent CSVLogger header mismatch when sanity validation logs
+            # different metric keys than the first training epoch.
+            'num_sanity_val_steps': 0,
             'log_every_n_steps': 50,}
         
         optimizer = a.optimizer if train_custom_args is None else train_custom_args.get('optimizer', a.optimizer)
