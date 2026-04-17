@@ -363,8 +363,12 @@ Examples:
     # SLURM parameters
     parser.add_argument('--account', type=str, default='kite_gpu',
                         help='SLURM account')
-    parser.add_argument('--time', type=str, default='0-12:0:0',
-                        help='Time limit (format: D-HH:MM:SS)')
+    parser.add_argument(
+        '--time',
+        type=str,
+        default=None,
+        help="Time limit (format: D-HH:MM:SS). Default: train=0-06:00:00, test=0-00:30:00",
+    )
     parser.add_argument('--output', type=str, default='out_pointnet_zoned_carelab_act_test.out',
                         help='Output file name (used only if --use-custom-output is set)')
     parser.add_argument('--use-custom-output', action='store_true',
@@ -425,6 +429,10 @@ Examples:
                         help='Save generated scripts to files with this prefix instead of submitting')
     
     args = parser.parse_args()
+
+    # Enforce consistent walltime defaults by mode (user policy)
+    if args.time is None:
+        args.time = "0-06:00:00" if args.mode == "train" else "0-00:30:00"
     
     # Identify parameters that support grid search and have multiple values
     grid_params = {
