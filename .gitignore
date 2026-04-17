@@ -1,9 +1,14 @@
 data/*
+external/*
+third_party/*
+vendor/*
 mmrnet/__pycache__/__init__.cpython-39.pyc
 mmrnet/__pycache__/cli.cpython-39.pyc
 mmrnet/dataset/__pycache__/*
 mmrnet/models/__pycache__/*
 mmrnet/session/__pycache__/*
+**/__pycache__/*
+*.pyc
 *.out
 checkpoints/
 lightning_logs/
@@ -12,3 +17,7 @@ milenv/
 outputs.zip
 checkpoints/README.md
 results/*
+build/
+dist/
+*.egg-info/
+*.so
