@@ -30,6 +30,7 @@ from .pointmamba_aux import PointMamba_Aux
 from .mamba4d import Mamba4D
 from .mamba4d_aux import Mamba4D_Aux
 from .mamba4d_aux_film import Mamba4D_Aux_FiLM
+from .p4transformer import P4Transformer, P4Transformer_Aux
 
 model_map = {
     'dgcnn': DGCNN,
@@ -63,4 +64,6 @@ model_map = {
     'mamba4d': Mamba4D,
     'mamba4d_aux': Mamba4D_Aux,
     'mamba4d_aux_film': Mamba4D_Aux_FiLM,
+    'p4transformer': P4Transformer,
+    'p4transformer_aux': P4Transformer_Aux,
 }
