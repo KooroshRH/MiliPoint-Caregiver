@@ -23,6 +23,20 @@ def parse_numeric_list(value_str, value_type):
     values = parse_value(value_str)
     return [value_type(v) for v in values]
 
+def format_for_name(value):
+    """
+    Stable string formatting for experiment names.
+
+    Python renders `1e-5` as `1e-05`; we normalize to `1e-5` to keep
+    checkpoint/output folder names consistent with user expectations.
+    """
+    s = str(value)
+    if "e-0" in s:
+        s = s.replace("e-0", "e-")
+    if "e+0" in s:
+        s = s.replace("e+0", "e+")
+    return s
+
 def create_processed_data_path(args_dict):
     """Create dynamic processed data path based on seed, stacks, sampling_rate, max_points, and zero_padding."""
     base_path = args_dict['processed_data_base']
@@ -89,9 +103,9 @@ def create_output_paths(args_dict):
     exp_name = (f"{args_dict['model']}_{args_dict['task']}_"
                 f"seed{args_dict['seed']}_stack{args_dict['stacks']}_srate{args_dict['sampling_rate']}_"
                 f"{args_dict['cross_validation']}_{cv_info}_"
-                f"opt{args_dict['optimizer']}_lr{args_dict['learning_rate']}_"
+                f"opt{args_dict['optimizer']}_lr{format_for_name(args_dict['learning_rate'])}_"
                 f"bs{args_dict['batch_size']}_ep{args_dict['max_epochs']}_"
-                f"wd{args_dict['weight_decay']}{ablation_postfix}")
+                f"wd{format_for_name(args_dict['weight_decay'])}{ablation_postfix}")
 
     # Create checkpoint directory
     checkpoint_dir = os.path.join(args_dict['checkpoint_base'], exp_name)
