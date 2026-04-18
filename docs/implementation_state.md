@@ -1,5 +1,5 @@
 # Implementation State — NeurIPS 2026 Revision
-**Last updated: 2026-04-15**
+**Last updated: 2026-04-18**
 
 This document captures the complete state of the codebase as of the NeurIPS 2026 revision effort. A fresh Claude instance reading this should be able to continue work without needing to retrace prior conversations.
 
@@ -124,6 +124,8 @@ Run `misc/frame_signals_diagnostic.py` (requires compute node via `sbatch diagno
 | `dgcnn_aux_t` | `dgcnn_aux_t.py` | DGCNN + 15D concat + Temporal Transformer | `(B,T,N,6)+(B,T,9)` → 15D flat |
 | `dgcnn_aux_fusion_t_v2` | `dgcnn_aux_fusion_t_v2.py` | DGCNN + point-level FiLM + Temporal Transformer | `(B,T,N,6)+(B,T,9)` (fs ignored) |
 | `dgcnn_mmc_t` | `dgcnn_mmc_t.py` | DGCNN + point-level FiLM + frame-level cross-attn + Temporal Transformer | `(B,T,N,6)+(B,T,9)` |
+| `p4transformer` | `p4transformer.py` | P4Transformer-style temporal baseline (pure PyTorch “P4DConv-lite” + Transformer) | XYZ-only: `(B,T,N,6)→xyz` |
+| `p4transformer_aux` | `p4transformer.py` | Aux variant: uses all point aux + all frame aux | `(xyz + Doppler/SNR/Density + IMU/BLE)` = 15D |
 
 ### 3.2 Proposed Model: `dgcnn_mmc_t` (DGCNN-MMC-T)
 
@@ -240,6 +242,8 @@ All models must accept `(point_cloud, frame_signals), y` from the dataset.
 | `dgcnn_aux_t` | Broadcast fs → 15D, flatten T, temporal transformer | 15 |
 | `dgcnn_aux_fusion_t_v2` | Unpack tuple, ignore fs, 6D point-level FiLM | 6 |
 | `dgcnn_mmc_t` | Unpack tuple, 6D FiLM + 9D cross-attn | 6+9 |
+| `p4transformer` | Temporal model, XYZ-only | 3 |
+| `p4transformer_aux` | Temporal model, full aux (point+frame) | 15 |
 
 ### ✅ Updated 2026-04-15 (all now compatible)
 | Model | File | Strategy |
