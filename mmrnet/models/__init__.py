@@ -31,6 +31,8 @@ from .mamba4d import Mamba4D
 from .mamba4d_aux import Mamba4D_Aux
 from .mamba4d_aux_film import Mamba4D_Aux_FiLM
 from .p4transformer import P4Transformer, P4Transformer_Aux
+from .sts_mixer import STSMixer, STSMixer_Aux
+from .ust_ssm import USTSSM, USTSSM_Aux
 
 model_map = {
     'dgcnn': DGCNN,
@@ -66,4 +68,8 @@ model_map = {
     'mamba4d_aux_film': Mamba4D_Aux_FiLM,
     'p4transformer': P4Transformer,
     'p4transformer_aux': P4Transformer_Aux,
+    'sts_mixer': STSMixer,
+    'sts_mixer_aux': STSMixer_Aux,
+    'ust_ssm': USTSSM,
+    'ust_ssm_aux': USTSSM_Aux,
 }
