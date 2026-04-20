@@ -126,6 +126,10 @@ Run `misc/frame_signals_diagnostic.py` (requires compute node via `sbatch diagno
 | `dgcnn_mmc_t` | `dgcnn_mmc_t.py` | DGCNN + point-level FiLM + frame-level cross-attn + Temporal Transformer | `(B,T,N,6)+(B,T,9)` |
 | `p4transformer` | `p4transformer.py` | P4Transformer-style temporal baseline (pure PyTorch “P4DConv-lite” + Transformer) | XYZ-only: `(B,T,N,6)→xyz` |
 | `p4transformer_aux` | `p4transformer.py` | Aux variant: uses all point aux + all frame aux | `(xyz + Doppler/SNR/Density + IMU/BLE)` = 15D |
+| `sts_mixer` | `sts_mixer.py` | STS-Mixer–style: P4DConv-lite + spatial/temporal/channel mixer blocks | XYZ-only |
+| `sts_mixer_aux` | `sts_mixer.py` | Aux variant: full point + frame aux | 15D |
+| `ust_ssm` | `ust_ssm.py` | UST-SSM–style: P4DConv-lite + unified sequence (Mamba on `T×N` tokens; GRU fallback if unavailable) | XYZ-only |
+| `ust_ssm_aux` | `ust_ssm.py` | Aux variant: full point + frame aux | 15D |
 
 ### 3.2 Proposed Model: `dgcnn_mmc_t` (DGCNN-MMC-T)
 
@@ -244,6 +248,10 @@ All models must accept `(point_cloud, frame_signals), y` from the dataset.
 | `dgcnn_mmc_t` | Unpack tuple, 6D FiLM + 9D cross-attn | 6+9 |
 | `p4transformer` | Temporal model, XYZ-only | 3 |
 | `p4transformer_aux` | Temporal model, full aux (point+frame) | 15 |
+| `sts_mixer` | Same contract as `p4transformer` | 3 |
+| `sts_mixer_aux` | Same as `p4transformer_aux` | 15 |
+| `ust_ssm` | Same contract as `p4transformer` | 3 |
+| `ust_ssm_aux` | Same as `p4transformer_aux` | 15 |
 
 ### ✅ Updated 2026-04-15 (all now compatible)
 | Model | File | Strategy |
