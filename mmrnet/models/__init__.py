@@ -33,6 +33,10 @@ from .mamba4d_aux_film import Mamba4D_Aux_FiLM
 from .p4transformer import P4Transformer, P4Transformer_Aux
 from .sts_mixer import STSMixer, STSMixer_Aux
 from .ust_ssm import USTSSM, USTSSM_Aux
+from .pst_transformer import PSTTransformer, PSTTransformer_Aux
+from .kinet import Kinet, Kinet_Aux
+from .three_dinaction import ThreeDInAction, ThreeDInAction_Aux
+from .dgcnn_mmc_ssm_t import DGCNNMultiModalCondSSMT
 
 model_map = {
     'dgcnn': DGCNN,
@@ -72,4 +76,12 @@ model_map = {
     'sts_mixer_aux': STSMixer_Aux,
     'ust_ssm': USTSSM,
     'ust_ssm_aux': USTSSM_Aux,
+    'pst_transformer': PSTTransformer,
+    'pst_transformer_aux': PSTTransformer_Aux,
+    'kinet': Kinet,
+    'kinet_aux': Kinet_Aux,
+    '3dinaction': ThreeDInAction,
+    '3dinaction_aux': ThreeDInAction_Aux,
+    # DGCNN-MMC variant with Mamba/SSM temporal modeling (aux-only).
+    'dgcnn_mmc_ssm_t': DGCNNMultiModalCondSSMT,
 }
