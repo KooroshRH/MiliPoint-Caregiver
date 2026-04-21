@@ -183,7 +183,9 @@ class DGCNNMultiModalCondT(nn.Module):
                  info,
                  k=20,
                  conv_layers=(32, 32, 32),
-                 dense_layers=(1024, 1024, 256, 128),
+                 # Default reduced to match 256-dim temporal token scale (P4Transformer-like).
+                 # This keeps parameter count and capacity comparable across temporal baselines.
+                 dense_layers=(256, 256, 128, 64),
                  point_aux_dim=3,        # Doppler, SNR, Density
                  frame_aux_dim=9,        # acc(3) + gyro(3) + BLE(3)
                  frame_modality_dims=(3, 3, 3),  # one entry per modality in frame_signals
