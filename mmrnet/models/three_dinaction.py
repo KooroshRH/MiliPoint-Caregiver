@@ -8,6 +8,8 @@ implementation uses a per-frame mini PointNet embedding plus a temporal
 Transformer over frame tokens (no vendored 3DInAction code).
 """
 
+from typing import Optional
+
 import torch
 import torch.nn as nn
 
@@ -63,7 +65,16 @@ class _ThreeDInActionCore(nn.Module):
             nn.Linear(embed_dim, num_classes),
         )
 
-    def forward(self, feats: torch.Tensor, _xyz: torch.Tensor) -> torch.Tensor:
+    def forward(
+        self,
+        feats: torch.Tensor,
+        xyz: Optional[torch.Tensor] = None,
+    ) -> torch.Tensor:
+        """
+        xyz: optional, ignored — kept for the same (feats, xyz) call pattern
+        as other temporal models; geometry is already in ``feats`` (XYZ-only or
+        15D aux).
+        """
         B, T, N, C = feats.shape
         x = feats.reshape(B * T, N, C)
         x = self.embed(x)
