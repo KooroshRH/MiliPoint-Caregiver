@@ -60,17 +60,32 @@ def parse_test_output(filepath):
             result[key] = float(m.group(1))
 
     # Merged class metrics
-    m = re.search(r'Test Accuracy \(Merged Classes\):\s*([\d.]+)', content)
-    if m:
-        result['merged_acc'] = float(m.group(1))
+    # Be permissive: some logs vary in capitalization / "F1-score" vs "F1 score",
+    # and floats may be printed in scientific notation.
+    float_re = r'([0-9]*\.?[0-9]+(?:[eE][-+]?\d+)?)'
+    def _search_float(patterns):
+        for pat in patterns:
+            m = re.search(pat, content, flags=re.IGNORECASE)
+            if m:
+                return float(m.group(1))
+        return None
 
-    m = re.search(r'Test F1 score \(Before Merging\):\s*([\d.]+)', content)
-    if m:
-        result['f1_before_merge'] = float(m.group(1))
+    result['merged_acc'] = _search_float([
+        rf'Test\s+Accuracy\s*\(Merged\s+Classes\)\s*:\s*{float_re}',
+        rf'Merged\s+Accuracy\s*:\s*{float_re}',
+    ])
 
-    m = re.search(r'Test F1 score \(Merged Classes\):\s*([\d.]+)', content)
-    if m:
-        result['f1_merged'] = float(m.group(1))
+    result['f1_before_merge'] = _search_float([
+        rf'Test\s+F1\s*(?:-|_|\s*)?(?:score)?\s*\(Before\s+Merging\)\s*:\s*{float_re}',
+        rf'Test\s+F1\s*(?:-|_|\s*)?(?:score)?\s*Before\s+Merging\s*:\s*{float_re}',
+        rf'F1\s*(?:-|_|\s*)?(?:score)?\s*\(Before\s+Merging\)\s*:\s*{float_re}',
+    ])
+
+    result['f1_merged'] = _search_float([
+        rf'Test\s+F1\s*(?:-|_|\s*)?(?:score)?\s*\(Merged\s+Classes\)\s*:\s*{float_re}',
+        rf'Test\s+F1\s*(?:-|_|\s*)?(?:score)?\s*Merged\s+Classes\s*:\s*{float_re}',
+        rf'F1\s*(?:-|_|\s*)?(?:score)?\s*\(Merged\s+Classes\)\s*:\s*{float_re}',
+    ])
 
     # Confusion matrix: lines like [[a b c d]\n [e f g h]\n ...]
     cm_match = re.search(r'Confusion Matrix \(Merged Classes\):\s*\n?(\[\[.+?\]\])', content, re.DOTALL)
@@ -173,6 +188,7 @@ def main():
         model_rows = [r for r in rows if r['model'] == model]
         accs = [r['test_acc'] for r in model_rows if r['test_acc'] is not None]
         merged = [r['merged_acc'] for r in model_rows if r['merged_acc'] is not None]
+        f1_before = [r['f1_before_merge'] for r in model_rows if r['f1_before_merge'] is not None]
         f1s = [r['f1_merged'] for r in model_rows if r['f1_merged'] is not None]
         print(f"{model} ({len(model_rows)} subjects):")
         if accs:
@@ -181,6 +197,8 @@ def main():
         if merged:
             print(f"  merged_acc: {np.mean(merged):.4f} ± {np.std(merged):.4f}  "
                   f"[min={min(merged):.4f}, max={max(merged):.4f}]")
+        if f1_before:
+            print(f"  f1_before_merge: {np.mean(f1_before):.4f} ± {np.std(f1_before):.4f}")
         if f1s:
             print(f"  f1_merged:  {np.mean(f1s):.4f} ± {np.std(f1s):.4f}")
 
