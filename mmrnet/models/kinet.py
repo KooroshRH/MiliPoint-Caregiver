@@ -47,10 +47,10 @@ class _KinetCore(nn.Module):
             nn.Linear(embed_dim, num_classes),
         )
 
-    def forward(self, feats: torch.Tensor, _xyz: torch.Tensor) -> torch.Tensor:
+    def forward(self, feats: torch.Tensor, xyz: torch.Tensor = None) -> torch.Tensor:
         """
         feats: (B,T,N,Cin) — uses full channels (xyz or 15D aux).
-        _xyz: unused; kept for API parity with other temporal models.
+        xyz: unused; kept for API parity with other temporal models.
         """
         B, T, N, C = feats.shape
         x = feats.reshape(B * T, N, C).transpose(1, 2)  # (B*T, C, N)
